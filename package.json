@@ -1,0 +1,33 @@
+{
+  "name": "solana-wallet-distributor",
+  "version": "2.0.0",
+  "description": "Create 100 Solana wallets and distribute SOL using Jito",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts"
+  },
+  "dependencies": {
+    "@coral-xyz/anchor": "^0.32.1",
+    "@coral-xyz/borsh": "^0.32.1",
+    "@inquirer/prompts": "^8.2.0",
+    "@pump-fun/pump-sdk": "^1.26.0",
+    "@solana/spl-token": "^0.4.14",
+    "@solana/web3.js": "^1.98.4",
+    "bs58": "^6.0.0",
+    "chalk": "^5.6.2",
+    "dotenv": "^17.2.3",
+    "inquirer": "^13.2.0",
+    "jito-ts": "^4.2.1",
+    "ora": "^9.0.0",
+    "pumpdotfun-sdk": "^1.4.2"
+  },
+  "devDependencies": {
+    "@types/bn.js": "^5.2.0",
+    "@types/inquirer": "^9.0.9",
+    "@types/node": "^25.0.9",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  }
+}
