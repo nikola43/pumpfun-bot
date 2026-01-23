@@ -201,15 +201,34 @@ export async function actionFundWallets(
   connection: Connection,
   payerWallet: Keypair
 ): Promise<void> {
-  const wallets = loadWalletsFromDir();
+  const allWallets = loadWalletsFromDir();
 
-  if (!wallets || wallets.length === 0) {
+  if (!allWallets || allWallets.length === 0) {
     printError("No wallets found. Create wallets first!");
     await pressAnyKeyToContinue();
     return;
   }
 
-  console.log(chalk.cyan(`  📁 Found ${wallets.length} wallets\n`));
+  console.log(chalk.cyan(`  📁 Found ${allWallets.length} wallets\n`));
+
+  // Ask for wallet range
+  const fromWallet = await number({
+    message: chalk.cyan("From wallet #") + chalk.gray(` (1-${allWallets.length}, default: 1)`) + chalk.cyan(":"),
+    default: 1,
+    step: 1,
+    validate: (value) => (value && value >= 1 && value <= allWallets.length ? true : `Must be 1-${allWallets.length}`),
+  }) || 1;
+
+  const toWallet = await number({
+    message: chalk.cyan("To wallet #") + chalk.gray(` (${fromWallet}-${allWallets.length}, default: ${allWallets.length})`) + chalk.cyan(":"),
+    default: allWallets.length,
+    step: 1,
+    validate: (value) => (value && value >= fromWallet && value <= allWallets.length ? true : `Must be ${fromWallet}-${allWallets.length}`),
+  }) || allWallets.length;
+
+  // Slice wallets (convert 1-based to 0-based index)
+  const wallets = allWallets.slice(fromWallet - 1, toWallet);
+  console.log(chalk.cyan(`\n  📋 Selected wallets ${fromWallet}-${toWallet} (${wallets.length} wallets)\n`));
 
   const minSol = await number({
     message: chalk.cyan("Min SOL per wallet") + chalk.gray(" (default: 0.001)") + chalk.cyan(":"),
