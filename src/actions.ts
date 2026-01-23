@@ -48,8 +48,8 @@ import {
 import {
   fetchPumpTokenInfo,
   getTokenBalances,
-  executeBuyWithJito,
-  executeSellWithJito,
+  executeBuy,
+  executeSell,
   getAllWalletTokenHoldings,
   aggregateTokenHoldings,
   transferAllTokensToWallet,
@@ -771,20 +771,7 @@ export async function actionBuyToken(
   console.log(chalk.cyan.bold("\n  📊 Token Info\n"));
   printInfo("Mint", tokenMint.slice(0, 20) + "...");
   printInfo("Virtual SOL", `${(tokenInfo.virtualSolReserves.toNumber() / LAMPORTS_PER_SOL).toFixed(4)} SOL`);
-
-  const minSol = await number({
-    message: chalk.cyan("Min SOL per wallet") + chalk.gray(" (default: 0.001)") + chalk.cyan(":"),
-    default: 0.001,
-    step: 0.0001,
-    validate: (value) => (value && value > 0 ? true : "Must be greater than 0"),
-  }) || 0.001;
-
-  const maxSol = await number({
-    message: chalk.cyan("Max SOL per wallet") + chalk.gray(" (default: 0.01)") + chalk.cyan(":"),
-    default: 0.01,
-    step: 0.0001,
-    validate: (value) => (value && value >= minSol ? true : "Must be >= min amount"),
-  }) || 0.01;
+  printInfo("Buy Amount", "92% of each wallet's SOL balance");
 
   const slippage = await number({
     message: chalk.cyan("Slippage %") + chalk.gray(" (default: 25)") + chalk.cyan(":"),
@@ -807,12 +794,9 @@ export async function actionBuyToken(
     validate: (value) => (value !== undefined && value >= minDelaySeconds ? true : "Must be >= min delay"),
   }) ?? 0;
 
-  const avgSol = (minSol + maxSol) / 2;
-  const estimatedTotal = avgSol * wallets.length;
-
   const shouldBuy = await confirm({
     message: chalk.yellow(
-      `Buy with ~${estimatedTotal.toFixed(4)} SOL across ${wallets.length} wallets?`
+      `Buy with 92% of SOL balance from ${wallets.length} wallets?`
     ),
     default: true,
   });
@@ -834,15 +818,11 @@ export async function actionBuyToken(
     // Convert slippage % to basis points (1% = 100 bps)
     const slippageBps = slippage * 100;
 
-    const result = await executeBuyWithJito(
+    const result = await executeBuy(
       connection,
       wallets,
       tokenInfo.mint,
-      minSol,
-      maxSol,
       slippageBps,
-      CONFIG.JITO_ENDPOINT,
-      CONFIG.JITO_CONFIG,
       {
         minDelayMs: minDelaySeconds * 1000,
         maxDelayMs: maxDelaySeconds * 1000,
@@ -1013,14 +993,12 @@ export async function actionSellToken(
     // Convert slippage % to basis points (1% = 100 bps)
     const slippageBps = slippage * 100;
 
-    const result = await executeSellWithJito(
+    const result = await executeSell(
       connection,
       walletsWithTokens,
       tokenInfo.mint,
       sellPercentage,
       slippageBps,
-      CONFIG.JITO_ENDPOINT,
-      CONFIG.JITO_CONFIG,
       (current, total, success, failed, lastTx) => {
         sellSpinner.text = chalk.cyan(
           `Wallet ${current}/${total} | ✓ ${success} | ✗ ${failed}`
@@ -1148,12 +1126,10 @@ export async function actionTransferTokensToPayer(
       connection,
       wallets,
       payerWallet.publicKey,
-      CONFIG.JITO_ENDPOINT,
-      CONFIG.JITO_CONFIG,
       (current, total, message) => {
         transferSpinner.text = chalk.cyan(`[${current}%] ${message}`);
       },
-      payerWallet // Use payer wallet to pay for tips and fees
+      payerWallet // Use payer wallet to pay for fees
     );
 
     transferSpinner.stop();

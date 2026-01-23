@@ -3,7 +3,6 @@ import {
   Keypair,
   LAMPORTS_PER_SOL,
   PublicKey,
-  SystemProgram,
   TransactionMessage,
   VersionedTransaction,
   ComputeBudgetProgram,
@@ -31,23 +30,11 @@ import {
 // Import from local SDK for compatibility
 import { DEFAULT_DECIMALS } from "./pumpdotfun-sdk/src/pumpfun";
 
-// Import Jito utilities
-import {
-  sendBundleWithOnChainVerification,
-  getTipAccounts,
-  getRandomTipAccount,
-  JitoConfig,
-  getTipFloor,
-} from "./jito";
-
 // Priority fees for transactions
 const PRIORITY_FEE = {
   unitLimit: 400000,
   unitPrice: 400000,
 };
-
-// Minimum Jito tip (0.003 SOL) - higher for better landing rate
-const MIN_TIP_LAMPORTS = 3_000_000;
 
 /**
  * Sleep utility
@@ -261,18 +248,14 @@ async function simulateTransaction(
 }
 
 /**
- * Execute buy for multiple wallets with simulation + RPC send
- * Sends transactions individually via RPC with priority tip for reliable landing
+ * Execute buy for multiple wallets
+ * Each wallet sends its own independent transaction using 92% of SOL balance
  */
-export async function executeBuyWithJito(
+export async function executeBuy(
   connection: Connection,
   wallets: Keypair[],
   mint: PublicKey,
-  minSolAmount: number,
-  maxSolAmount: number,
   slippageBps: number = 2500,
-  jitoEndpoint: string,
-  jitoConfig: Partial<JitoConfig> = {},
   options?: BuyOptions
 ): Promise<BuyResult> {
   // Initialize SDK
@@ -294,29 +277,24 @@ export async function executeBuyWithJito(
   let failed = 0;
   const signatures: string[] = [];
 
-  // Get tip accounts and dynamic tip floor for priority
-  const tipAccounts = await getTipAccounts(jitoEndpoint, jitoConfig);
-  let tipLamports: number;
-  try {
-    const fetchedTip = await getTipFloor(jitoEndpoint, "99", jitoConfig);
-    tipLamports = Math.max(fetchedTip, MIN_TIP_LAMPORTS);
-    console.log(`Using tip: ${(tipLamports / LAMPORTS_PER_SOL).toFixed(6)} SOL`);
-  } catch {
-    tipLamports = MIN_TIP_LAMPORTS;
-    console.log(`Using default tip: ${(tipLamports / LAMPORTS_PER_SOL).toFixed(6)} SOL`);
-  }
-
-  // Process each wallet individually for reliable landing
+  // Process each wallet individually - no connection between wallets
   for (let i = 0; i < wallets.length; i++) {
     const wallet = wallets[i];
 
     try {
       const { blockhash } = await connection.getLatestBlockhash("confirmed");
-      const tipAccount = getRandomTipAccount(tipAccounts);
 
-      // Random SOL amount between min and max
-      const solAmountSOL = minSolAmount + Math.random() * (maxSolAmount - minSolAmount);
-      const solAmountLamports = Math.floor(solAmountSOL * LAMPORTS_PER_SOL);
+      // Get wallet's SOL balance and use 92% for the buy
+      const walletBalance = await connection.getBalance(wallet.publicKey);
+      const solAmountLamports = Math.floor(walletBalance * 0.92);
+
+      // Skip if wallet has insufficient balance (need some for fees)
+      if (solAmountLamports <= 50000) {
+        console.log(`Wallet ${wallet.publicKey.toBase58().slice(0, 8)}... has insufficient balance, skipping`);
+        failed++;
+        options?.onProgress?.(i + 1, wallets.length, success, failed);
+        continue;
+      }
 
       // Fetch buy state for this wallet
       const buyState = await sdk.fetchBuyState(mint, wallet.publicKey, tokenProgram);
@@ -345,17 +323,11 @@ export async function executeBuyWithJito(
         tokenProgram,
       });
 
-      // Build instructions with priority fees and tip
+      // Build instructions with priority fees only
       const instructions = [
         ComputeBudgetProgram.setComputeUnitLimit({ units: PRIORITY_FEE.unitLimit }),
         ComputeBudgetProgram.setComputeUnitPrice({ microLamports: PRIORITY_FEE.unitPrice }),
         ...buyInstructions,
-        // Add tip for priority
-        SystemProgram.transfer({
-          fromPubkey: wallet.publicKey,
-          toPubkey: new PublicKey(tipAccount),
-          lamports: tipLamports,
-        }),
       ];
 
       const messageV0 = new TransactionMessage({
@@ -367,20 +339,8 @@ export async function executeBuyWithJito(
       const transaction = new VersionedTransaction(messageV0);
       transaction.sign([wallet]);
 
-      // Simulate transaction first
-      const simResult = await simulateTransaction(connection, transaction);
-      if (!simResult.success) {
-        console.error(`Simulation FAILED for wallet ${wallet.publicKey.toBase58().slice(0, 8)}:`, simResult.error);
-        if (simResult.logs) {
-          console.error("Logs:", simResult.logs.slice(-5).join("\n"));
-        }
-        failed++;
-        options?.onProgress?.(i + 1, wallets.length, success, failed);
-        continue;
-      }
-
-      // Send via RPC and wait for confirmation
-      const result = await sendTransactionWithConfirmation(connection, transaction, 30000);
+      // Send transaction
+      const result = await sendTransactionWithConfirmation(connection, transaction, 60000);
 
       if (result.success) {
         success++;
@@ -398,7 +358,7 @@ export async function executeBuyWithJito(
           const delay = getRandomDelay(options.minDelayMs, options.maxDelayMs);
           await sleep(delay);
         } else {
-          await sleep(200); // Small default delay
+          await sleep(100); // Small default delay
         }
       }
     } catch (e) {
@@ -422,17 +382,15 @@ export interface SellResult {
 }
 
 /**
- * Execute sell for multiple wallets with simulation + RPC send
- * Sends transactions individually via RPC with priority tip for reliable landing
+ * Execute sell for multiple wallets
+ * Each wallet sends its own independent transaction
  */
-export async function executeSellWithJito(
+export async function executeSell(
   connection: Connection,
   walletBalances: { wallet: Keypair; balance: BN }[],
   mint: PublicKey,
   sellPercentage: number,
   slippageBps: number = 2500,
-  jitoEndpoint: string,
-  jitoConfig: Partial<JitoConfig> = {},
   onProgress?: (current: number, total: number, success: number, failed: number, lastTx?: string) => void
 ): Promise<SellResult> {
   // Initialize SDK
@@ -462,19 +420,7 @@ export async function executeSellWithJito(
   let totalSold = new BN(0);
   const signatures: string[] = [];
 
-  // Get tip accounts and dynamic tip floor for priority
-  const tipAccounts = await getTipAccounts(jitoEndpoint, jitoConfig);
-  let tipLamports: number;
-  try {
-    const fetchedTip = await getTipFloor(jitoEndpoint, "99", jitoConfig);
-    tipLamports = Math.max(fetchedTip, MIN_TIP_LAMPORTS);
-    console.log(`Sell using tip: ${(tipLamports / LAMPORTS_PER_SOL).toFixed(6)} SOL`);
-  } catch {
-    tipLamports = MIN_TIP_LAMPORTS;
-    console.log(`Sell using default tip: ${(tipLamports / LAMPORTS_PER_SOL).toFixed(6)} SOL`);
-  }
-
-  // Process each wallet individually for reliable landing
+  // Process each wallet individually - no connection between wallets
   for (let i = 0; i < walletsToSell.length; i++) {
     const { wallet, balance } = walletsToSell[i];
 
@@ -487,7 +433,6 @@ export async function executeSellWithJito(
 
     try {
       const { blockhash } = await connection.getLatestBlockhash("confirmed");
-      const tipAccount = getRandomTipAccount(tipAccounts);
 
       // Fetch sell state for this wallet
       const sellState = await sdk.fetchSellState(mint, wallet.publicKey, tokenProgram);
@@ -515,17 +460,11 @@ export async function executeSellWithJito(
         mayhemMode: sellState.bondingCurve.isMayhemMode || false,
       });
 
-      // Build instructions with priority fees and tip
+      // Build instructions with priority fees only
       const instructions = [
         ComputeBudgetProgram.setComputeUnitLimit({ units: PRIORITY_FEE.unitLimit }),
         ComputeBudgetProgram.setComputeUnitPrice({ microLamports: PRIORITY_FEE.unitPrice }),
         ...sellInstructions,
-        // Add tip for priority
-        SystemProgram.transfer({
-          fromPubkey: wallet.publicKey,
-          toPubkey: new PublicKey(tipAccount),
-          lamports: tipLamports,
-        }),
       ];
 
       const messageV0 = new TransactionMessage({
@@ -537,20 +476,8 @@ export async function executeSellWithJito(
       const transaction = new VersionedTransaction(messageV0);
       transaction.sign([wallet]);
 
-      // Simulate transaction first
-      const simResult = await simulateTransaction(connection, transaction);
-      if (!simResult.success) {
-        console.error(`Sell simulation FAILED for wallet ${wallet.publicKey.toBase58().slice(0, 8)}:`, simResult.error);
-        if (simResult.logs) {
-          console.error("Logs:", simResult.logs.slice(-5).join("\n"));
-        }
-        failed++;
-        onProgress?.(i + 1, walletsToSell.length, success, failed);
-        continue;
-      }
-
-      // Send via RPC and wait for confirmation
-      const result = await sendTransactionWithConfirmation(connection, transaction, 30000);
+      // Send transaction
+      const result = await sendTransactionWithConfirmation(connection, transaction, 60000);
 
       if (result.success) {
         success++;
@@ -565,7 +492,7 @@ export async function executeSellWithJito(
 
       // Small delay between transactions
       if (i < walletsToSell.length - 1) {
-        await sleep(200);
+        await sleep(100);
       }
     } catch (e) {
       console.error(`Error processing sell for wallet ${i}:`, e);
@@ -754,17 +681,15 @@ export interface TokenTransferResult {
 }
 
 /**
- * Transfer all tokens from wallets to destination with simulation + RPC send
- * Uses feePayer to pay for tips and transaction fees so source wallets don't need SOL
+ * Transfer all tokens from wallets to destination
+ * Uses feePayer to pay for transaction fees so source wallets don't need SOL
  */
 export async function transferAllTokensToWallet(
   connection: Connection,
   wallets: Keypair[],
   destinationWallet: PublicKey,
-  jitoEndpoint: string,
-  jitoConfig: Partial<JitoConfig> = {},
   onProgress?: (current: number, total: number, message: string) => void,
-  feePayer?: Keypair // Optional fee payer - if provided, pays for tips and fees
+  feePayer?: Keypair // Optional fee payer - if provided, pays for fees
 ): Promise<TokenTransferResult> {
   onProgress?.(0, 100, "Scanning wallets for tokens...");
   const holdings = await getAllWalletTokenHoldings(connection, wallets);
@@ -789,17 +714,6 @@ export async function transferAllTokensToWallet(
   const signatures: string[] = [];
   const tokensTransferred: { mint: string; amount: BN }[] = [];
 
-  const tipAccounts = await getTipAccounts(jitoEndpoint, jitoConfig);
-  let tipLamports: number;
-  try {
-    const fetchedTip = await getTipFloor(jitoEndpoint, "99", jitoConfig);
-    tipLamports = Math.max(fetchedTip, MIN_TIP_LAMPORTS);
-    console.log(`Transfer using tip: ${(tipLamports / LAMPORTS_PER_SOL).toFixed(6)} SOL`);
-  } catch {
-    tipLamports = MIN_TIP_LAMPORTS;
-    console.log(`Transfer using default tip: ${(tipLamports / LAMPORTS_PER_SOL).toFixed(6)} SOL`);
-  }
-
   // Determine the actual fee payer
   const actualFeePayer = feePayer || null;
   if (actualFeePayer) {
@@ -815,7 +729,7 @@ export async function transferAllTokensToWallet(
     }
   }
 
-  // Process each transfer individually for reliable landing
+  // Process each transfer individually
   for (let i = 0; i < allTransfers.length; i++) {
     const { holding, token } = allTransfers[i];
     const progress = 20 + Math.floor((i / allTransfers.length) * 75);
@@ -823,7 +737,6 @@ export async function transferAllTokensToWallet(
 
     try {
       const { blockhash } = await connection.getLatestBlockhash("confirmed");
-      const tipAccount = getRandomTipAccount(tipAccounts);
       const mintPubkey = new PublicKey(token.mint);
 
       // Determine token program
@@ -867,15 +780,6 @@ export async function transferAllTokensToWallet(
         )
       );
 
-      // Add priority tip from fee payer
-      instructions.push(
-        SystemProgram.transfer({
-          fromPubkey: txPayer, // Fee payer pays the tip
-          toPubkey: new PublicKey(tipAccount),
-          lamports: tipLamports,
-        })
-      );
-
       const messageV0 = new TransactionMessage({
         payerKey: txPayer,
         recentBlockhash: blockhash,
@@ -891,16 +795,8 @@ export async function transferAllTokensToWallet(
         transaction.sign([holding.wallet]);
       }
 
-      // Simulate first
-      const simResult = await simulateTransaction(connection, transaction);
-      if (!simResult.success) {
-        console.error(`Transfer simulation FAILED for ${holding.wallet.publicKey.toBase58().slice(0, 8)}:`, simResult.error);
-        failed++;
-        continue;
-      }
-
-      // Send via RPC and wait for confirmation
-      const result = await sendTransactionWithConfirmation(connection, transaction, 30000);
+      // Send transaction
+      const result = await sendTransactionWithConfirmation(connection, transaction, 60000);
 
       if (result.success) {
         success++;
@@ -913,7 +809,7 @@ export async function transferAllTokensToWallet(
 
       // Small delay between transfers
       if (i < allTransfers.length - 1) {
-        await sleep(200);
+        await sleep(100);
       }
     } catch (e) {
       console.error(`Transfer error:`, e);
