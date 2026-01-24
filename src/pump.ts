@@ -352,13 +352,13 @@ export async function executeBuy(
 
       options?.onProgress?.(i + 1, wallets.length, success, failed, result.signature);
 
-      // Add delay between transactions if configured
+      // Add delay between transactions if configured (default 250ms for 5 tx/sec rate limit)
       if (i < wallets.length - 1) {
         if (options?.minDelayMs && options?.maxDelayMs) {
           const delay = getRandomDelay(options.minDelayMs, options.maxDelayMs);
           await sleep(delay);
         } else {
-          await sleep(100); // Small default delay
+          await sleep(250); // Default delay to respect 5 tx/sec rate limit
         }
       }
     } catch (e) {
@@ -490,9 +490,9 @@ export async function executeSell(
 
       onProgress?.(i + 1, walletsToSell.length, success, failed, result.signature);
 
-      // Small delay between transactions
+      // Delay between transactions to respect 5 tx/sec rate limit
       if (i < walletsToSell.length - 1) {
-        await sleep(100);
+        await sleep(250);
       }
     } catch (e) {
       console.error(`Error processing sell for wallet ${i}:`, e);
@@ -807,9 +807,9 @@ export async function transferAllTokensToWallet(
         failed++;
       }
 
-      // Small delay between transfers
+      // Delay between transfers to respect 5 tx/sec rate limit
       if (i < allTransfers.length - 1) {
-        await sleep(100);
+        await sleep(250);
       }
     } catch (e) {
       console.error(`Transfer error:`, e);
