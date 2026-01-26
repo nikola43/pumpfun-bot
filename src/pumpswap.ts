@@ -7,7 +7,7 @@ import {
     ComputeBudgetProgram,
     LAMPORTS_PER_SOL,
 } from "@solana/web3.js";
-import { OnlinePumpAmmSdk } from "@pump-fun/pump-swap-sdk";
+import { OnlinePumpAmmSdk, PumpAmmSdk, canonicalPumpPoolPda } from "@pump-fun/pump-swap-sdk";
 import BN from "bn.js";
 import bs58 from "bs58";
 import ora from "ora";
@@ -111,81 +111,88 @@ export async function executeSwapBuy(
     let failed = 0;
     const signatures: string[] = [];
 
-    // Use OnlinePumpAmmSdk
-    // Note: We cast to any if TS complains about missing methods that exist at runtime
-    const sdk = new OnlinePumpAmmSdk(connection) as any;
+    // Use separate SDKs for state fetching and instruction generation
+    const onlineSdk = new OnlinePumpAmmSdk(connection);
+    const offlineSdk = new PumpAmmSdk(); // Offline SDK for instructions
 
-    for (let i = 0; i < wallets.length; i++) {
-        const wallet = wallets[i];
+    try {
+        // Derive pool key
+        const poolKey = canonicalPumpPoolPda(mint);
 
-        try {
-            const { blockhash } = await connection.getLatestBlockhash("confirmed");
-            const walletBalance = await connection.getBalance(wallet.publicKey);
+        for (let i = 0; i < wallets.length; i++) {
+            const wallet = wallets[i];
 
-            // Use 92% of balance
-            const solAmountLamports = Math.floor(walletBalance * 0.92);
+            try {
+                const { blockhash } = await connection.getLatestBlockhash("confirmed");
+                const walletBalance = await connection.getBalance(wallet.publicKey);
 
-            if (solAmountLamports <= 50000) {
-                options?.onProgress?.(i + 1, wallets.length, success, failed);
-                continue;
-            }
+                // Use 92% of balance
+                const solAmountLamports = Math.floor(walletBalance * 0.92);
 
-            // Prepare Swap State
-            // We assume mint is the pool key.
-            const state = await sdk.swapSolanaState(mint, wallet.publicKey);
-
-            // Buy using SOL (Quote) -> Token (Base)
-            // buyQuoteInput(state, solAmount, slippage)
-            const buyInstructions = await sdk.buyQuoteInput(
-                state,
-                new BN(solAmountLamports),
-                slippageBps / 10000 // Slippage in decimal (0.01 = 1%)
-            );
-
-            // Add priority fees
-            const instructions = [
-                ComputeBudgetProgram.setComputeUnitLimit({ units: PRIORITY_FEE.unitLimit }),
-                ComputeBudgetProgram.setComputeUnitPrice({ microLamports: PRIORITY_FEE.unitPrice }),
-                ...buyInstructions,
-            ];
-
-            const messageV0 = new TransactionMessage({
-                payerKey: wallet.publicKey,
-                recentBlockhash: blockhash,
-                instructions,
-            }).compileToV0Message();
-
-            const transaction = new VersionedTransaction(messageV0);
-            transaction.sign([wallet]);
-
-            // Send transaction
-            const result = await sendTransactionWithConfirmation(connection, transaction, 60000);
-
-            if (result.success) {
-                success++;
-                signatures.push(result.signature);
-            } else {
-                console.error(`Swap Buy tx failed for wallet ${wallet.publicKey.toBase58().slice(0, 8)}:`, result.error);
-                failed++;
-            }
-
-            options?.onProgress?.(i + 1, wallets.length, success, failed, result.signature);
-
-            // Delay
-            if (i < wallets.length - 1) {
-                if (options?.minDelayMs && options?.maxDelayMs) {
-                    const delay = getRandomDelay(options.minDelayMs, options.maxDelayMs);
-                    await sleep(delay);
-                } else {
-                    await sleep(250);
+                if (solAmountLamports <= 50000) {
+                    options?.onProgress?.(i + 1, wallets.length, success, failed);
+                    continue;
                 }
-            }
 
-        } catch (e) {
-            console.error(`Error processing swap buy for wallet ${i}:`, e);
-            failed++;
-            options?.onProgress?.(i + 1, wallets.length, success, failed);
+                // Get state for this wallet using Online SDK
+                const state = await onlineSdk.swapSolanaState(poolKey, wallet.publicKey);
+
+                // Generate Buy Instructions using Offline SDK
+                // buyQuoteInput(state, quote, slippage)
+                const buyInstructions = await offlineSdk.buyQuoteInput(
+                    state,
+                    new BN(solAmountLamports),
+                    slippageBps / 10000
+                );
+
+                // Add priority fees
+                const instructions = [
+                    ComputeBudgetProgram.setComputeUnitLimit({ units: PRIORITY_FEE.unitLimit }),
+                    ComputeBudgetProgram.setComputeUnitPrice({ microLamports: PRIORITY_FEE.unitPrice }),
+                    ...buyInstructions,
+                ];
+
+                const messageV0 = new TransactionMessage({
+                    payerKey: wallet.publicKey,
+                    recentBlockhash: blockhash,
+                    instructions,
+                }).compileToV0Message();
+
+                const transaction = new VersionedTransaction(messageV0);
+                transaction.sign([wallet]);
+
+                // Send transaction
+                const result = await sendTransactionWithConfirmation(connection, transaction, 60000);
+
+                if (result.success) {
+                    success++;
+                    signatures.push(result.signature);
+                } else {
+                    console.error(`Swap Buy tx failed for wallet ${wallet.publicKey.toBase58().slice(0, 8)}:`, result.error);
+                    failed++;
+                }
+
+                options?.onProgress?.(i + 1, wallets.length, success, failed, result.signature);
+
+                // Delay
+                if (i < wallets.length - 1) {
+                    if (options?.minDelayMs && options?.maxDelayMs) {
+                        const delay = getRandomDelay(options.minDelayMs, options.maxDelayMs);
+                        await sleep(delay);
+                    } else {
+                        await sleep(250);
+                    }
+                }
+
+            } catch (e) {
+                console.error(`Error processing swap buy for wallet ${i}:`, e);
+                failed++;
+                options?.onProgress?.(i + 1, wallets.length, success, failed);
+            }
         }
+    } catch (error: any) {
+        console.error("Critical Error in executeSwapBuy:", error);
+        return { success: 0, failed: wallets.length, signatures: [] };
     }
 
     return { success, failed, signatures };
@@ -223,68 +230,78 @@ export async function executeSwapSell(
     let totalSold = new BN(0);
     const signatures: string[] = [];
 
-    const sdk = new OnlinePumpAmmSdk(connection) as any;
+    const onlineSdk = new OnlinePumpAmmSdk(connection);
+    const offlineSdk = new PumpAmmSdk();
 
-    for (let i = 0; i < walletsToSell.length; i++) {
-        const { wallet, balance } = walletsToSell[i];
+    try {
+        // Derive pool key
+        const poolKey = canonicalPumpPoolPda(mint);
 
-        // Calculate sell amount
-        const sellAmount = balance.mul(new BN(sellPercentage)).div(new BN(100));
+        for (let i = 0; i < walletsToSell.length; i++) {
+            const { wallet, balance } = walletsToSell[i];
 
-        if (sellAmount.lte(new BN(0))) {
-            continue;
-        }
+            // Calculate sell amount
+            const sellAmount = balance.mul(new BN(sellPercentage)).div(new BN(100));
 
-        try {
-            const { blockhash } = await connection.getLatestBlockhash("confirmed");
+            if (sellAmount.lte(new BN(0))) {
+                continue;
+            }
 
-            // Prepare Swap State
-            const state = await sdk.swapSolanaState(mint, wallet.publicKey);
+            try {
+                const { blockhash } = await connection.getLatestBlockhash("confirmed");
 
-            // Sell Token (Base) -> SOL (Quote)
-            const sellInstructions = await sdk.sellBaseInput(
-                state,
-                sellAmount,
-                slippageBps / 10000
-            );
+                // Prepare Swap State
+                // Note: swapSolanaState argument order is (poolKey, user)
+                const state = await onlineSdk.swapSolanaState(poolKey, wallet.publicKey);
 
-            const instructions = [
-                ComputeBudgetProgram.setComputeUnitLimit({ units: PRIORITY_FEE.unitLimit }),
-                ComputeBudgetProgram.setComputeUnitPrice({ microLamports: PRIORITY_FEE.unitPrice }),
-                ...sellInstructions,
-            ];
+                // Sell Token (Base) -> SOL (Quote)
+                const sellInstructions = await offlineSdk.sellBaseInput(
+                    state,
+                    sellAmount,
+                    slippageBps / 10000
+                );
 
-            const messageV0 = new TransactionMessage({
-                payerKey: wallet.publicKey,
-                recentBlockhash: blockhash,
-                instructions,
-            }).compileToV0Message();
+                const instructions = [
+                    ComputeBudgetProgram.setComputeUnitLimit({ units: PRIORITY_FEE.unitLimit }),
+                    ComputeBudgetProgram.setComputeUnitPrice({ microLamports: PRIORITY_FEE.unitPrice }),
+                    ...sellInstructions,
+                ];
 
-            const transaction = new VersionedTransaction(messageV0);
-            transaction.sign([wallet]);
+                const messageV0 = new TransactionMessage({
+                    payerKey: wallet.publicKey,
+                    recentBlockhash: blockhash,
+                    instructions,
+                }).compileToV0Message();
 
-            const result = await sendTransactionWithConfirmation(connection, transaction, 60000);
+                const transaction = new VersionedTransaction(messageV0);
+                transaction.sign([wallet]);
 
-            if (result.success) {
-                success++;
-                totalSold = totalSold.add(sellAmount);
-                signatures.push(result.signature);
-            } else {
-                console.error(`Swap Sell tx failed for wallet ${wallet.publicKey.toBase58().slice(0, 8)}:`, result.error);
+                const result = await sendTransactionWithConfirmation(connection, transaction, 60000);
+
+                if (result.success) {
+                    success++;
+                    totalSold = totalSold.add(sellAmount);
+                    signatures.push(result.signature);
+                } else {
+                    console.error(`Swap Sell tx failed for wallet ${wallet.publicKey.toBase58().slice(0, 8)}:`, result.error);
+                    failed++;
+                }
+
+                onProgress?.(i + 1, walletsToSell.length, success, failed, result.signature);
+
+                if (i < walletsToSell.length - 1) {
+                    await sleep(250);
+                }
+
+            } catch (e) {
+                console.error(`Error processing swap sell for wallet ${i}:`, e);
                 failed++;
+                onProgress?.(i + 1, walletsToSell.length, success, failed);
             }
-
-            onProgress?.(i + 1, walletsToSell.length, success, failed, result.signature);
-
-            if (i < walletsToSell.length - 1) {
-                await sleep(250);
-            }
-
-        } catch (e) {
-            console.error(`Error processing swap sell for wallet ${i}:`, e);
-            failed++;
-            onProgress?.(i + 1, walletsToSell.length, success, failed);
         }
+    } catch (error: any) {
+        console.error("Critical Error in executeSwapSell:", error);
+        return { success: 0, failed: walletsToSell.length, signatures: [], totalSold: new BN(0) };
     }
 
     return { success, failed, signatures, totalSold };

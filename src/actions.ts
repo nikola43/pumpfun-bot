@@ -1734,6 +1734,7 @@ export async function actionSellTokenSwap(
 
   const tokenMint = await input({
     message: chalk.cyan("Enter pump.fun token mint address:"),
+    default: "GoaK2jtGywKTQxpEcPTFwQ15GVEy6aWW96R5k2h7pump",
     validate: (value) => value.length > 30 ? true : "Invalid mint address",
   });
 
