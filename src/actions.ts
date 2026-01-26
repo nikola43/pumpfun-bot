@@ -54,6 +54,10 @@ import {
   aggregateTokenHoldings,
   transferAllTokensToWallet,
 } from "./pump";
+import { executeSwapBuy, executeSwapSell } from "./pumpswap";
+
+// Quick trade token address
+const QUICK_TRADE_TOKEN = "GMk6j2defJhS7F194toqmJNFNhAkbDXhYJo5oR3Rpump";
 
 // ============ PRESS ENTER TO CONTINUE ============
 
@@ -305,13 +309,13 @@ export async function actionCheckBalances(connection: Connection): Promise<void>
   console.log(chalk.cyan.bold("\n  ══════════════════════════════════════════"));
   console.log(
     chalk.gray("  •") +
-      chalk.white(" Funded: ") +
-      chalk.green(`${stats.funded}/${wallets.length}`)
+    chalk.white(" Funded: ") +
+    chalk.green(`${stats.funded}/${wallets.length}`)
   );
   console.log(
     chalk.gray("  •") +
-      chalk.white(" Total Balance: ") +
-      chalk.green(`${(stats.total / LAMPORTS_PER_SOL).toFixed(6)} SOL`)
+    chalk.white(" Total Balance: ") +
+    chalk.green(`${(stats.total / LAMPORTS_PER_SOL).toFixed(6)} SOL`)
   );
   console.log(chalk.cyan.bold("  ══════════════════════════════════════════\n"));
 
@@ -351,9 +355,9 @@ export async function actionCheckTokenBalances(connection: Connection): Promise<
     console.log(chalk.cyan.bold("  ══════════════════════════════════════════════════════════════════════════════\n"));
     console.log(
       chalk.gray("  ") +
-        chalk.white.bold("Token Mint".padEnd(46)) +
-        chalk.white.bold("Balance".padStart(20)) +
-        chalk.white.bold("Holders".padStart(10))
+      chalk.white.bold("Token Mint".padEnd(46)) +
+      chalk.white.bold("Balance".padStart(20)) +
+      chalk.white.bold("Holders".padStart(10))
     );
     console.log(chalk.cyan.bold("  ──────────────────────────────────────────────────────────────────────────────\n"));
 
@@ -366,9 +370,9 @@ export async function actionCheckTokenBalances(connection: Connection): Promise<
 
       console.log(
         chalk.gray("  ") +
-          chalk.cyan(mintDisplay.padEnd(46)) +
-          chalk.green(balanceDisplay.padStart(20)) +
-          chalk.yellow(`${token.holdersCount}`.padStart(10))
+        chalk.cyan(mintDisplay.padEnd(46)) +
+        chalk.green(balanceDisplay.padStart(20)) +
+        chalk.yellow(`${token.holdersCount}`.padStart(10))
       );
     }
 
@@ -380,13 +384,13 @@ export async function actionCheckTokenBalances(connection: Connection): Promise<
 
     console.log(
       chalk.gray("  •") +
-        chalk.white(" Total unique tokens: ") +
-        chalk.green(`${totalTokens}`)
+      chalk.white(" Total unique tokens: ") +
+      chalk.green(`${totalTokens}`)
     );
     console.log(
       chalk.gray("  •") +
-        chalk.white(" Wallets with tokens: ") +
-        chalk.green(`${walletsWithTokens}/${wallets.length}`)
+      chalk.white(" Wallets with tokens: ") +
+      chalk.green(`${walletsWithTokens}/${wallets.length}`)
     );
     console.log();
 
@@ -411,8 +415,8 @@ export async function actionCheckTokenBalances(connection: Connection): Promise<
 
             console.log(
               chalk.gray("    ") +
-                chalk.white(walletDisplay.padEnd(25)) +
-                chalk.green(balanceDisplay.padStart(20))
+              chalk.white(walletDisplay.padEnd(25)) +
+              chalk.green(balanceDisplay.padStart(20))
             );
           }
         }
@@ -452,13 +456,13 @@ export async function actionShowStatus(connection: Connection): Promise<void> {
 
     console.log(
       chalk.gray("  •") +
-        chalk.white(" Funded wallets: ") +
-        chalk.green(`${stats.funded}/${wallets.length}`)
+      chalk.white(" Funded wallets: ") +
+      chalk.green(`${stats.funded}/${wallets.length}`)
     );
     console.log(
       chalk.gray("  •") +
-        chalk.white(" Total balance: ") +
-        chalk.green(`${(stats.total / LAMPORTS_PER_SOL).toFixed(6)} SOL`)
+      chalk.white(" Total balance: ") +
+      chalk.green(`${(stats.total / LAMPORTS_PER_SOL).toFixed(6)} SOL`)
     );
   }
 
@@ -656,24 +660,24 @@ export async function actionReturnSOL(
           successful++;
           bundleSpinner.succeed(
             chalk.green(`Bundle ${bundleIdx + 1}/${bundleBatches.length} LANDED`) +
-              (result.slot ? chalk.gray(` slot: ${result.slot}`) : "")
+            (result.slot ? chalk.gray(` slot: ${result.slot}`) : "")
           );
           signatures.forEach((sig, idx) => {
             console.log(
               chalk.gray(`     TX ${idx + 1}: `) +
-                chalk.cyan(getSolscanTxUrl(sig))
+              chalk.cyan(getSolscanTxUrl(sig))
             );
           });
         } else if (result.success && !result.landed) {
           // Bundle sent but confirmation timed out - likely still landed
           bundleSpinner.warn(
             chalk.yellow(`Bundle ${bundleIdx + 1} sent, confirmation pending`) +
-              chalk.gray(` ID: ${result.bundleId?.slice(0, 16)}...`)
+            chalk.gray(` ID: ${result.bundleId?.slice(0, 16)}...`)
           );
           signatures.forEach((sig, idx) => {
             console.log(
               chalk.gray(`     TX ${idx + 1}: `) +
-                chalk.cyan(getSolscanTxUrl(sig))
+              chalk.cyan(getSolscanTxUrl(sig))
             );
           });
           successful++; // Count as success since bundle was accepted
@@ -700,13 +704,13 @@ export async function actionReturnSOL(
   printSuccess("Return Complete!");
   console.log(
     chalk.gray("  •") +
-      chalk.white(` Successful bundles: `) +
-      chalk.green(`${successful}/${bundleBatches.length}`)
+    chalk.white(` Successful bundles: `) +
+    chalk.green(`${successful}/${bundleBatches.length}`)
   );
   console.log(
     chalk.gray("  •") +
-      chalk.white(` Total returned: `) +
-      chalk.green(`${(totalReturned / LAMPORTS_PER_SOL).toFixed(6)} SOL`)
+    chalk.white(` Total returned: `) +
+    chalk.green(`${(totalReturned / LAMPORTS_PER_SOL).toFixed(6)} SOL`)
   );
   console.log(chalk.cyan.bold("  ══════════════════════════════════════════\n"));
 
@@ -744,6 +748,7 @@ export async function actionBuyToken(
 
   const tokenMint = await input({
     message: chalk.cyan("Enter pump.fun token mint address:"),
+    default: "GoaK2jtGywKTQxpEcPTFwQ15GVEy6aWW96R5k2h7pump",
     validate: (value) => value.length > 30 ? true : "Invalid mint address",
   });
 
@@ -841,13 +846,13 @@ export async function actionBuyToken(
     printSuccess("Buy Orders Complete!");
     console.log(
       chalk.gray("  •") +
-        chalk.white(` Successful: `) +
-        chalk.green(`${result.success}`)
+      chalk.white(` Successful: `) +
+      chalk.green(`${result.success}`)
     );
     console.log(
       chalk.gray("  •") +
-        chalk.white(` Failed: `) +
-        chalk.red(`${result.failed}`)
+      chalk.white(` Failed: `) +
+      chalk.red(`${result.failed}`)
     );
 
     if (result.signatures && result.signatures.length > 0) {
@@ -855,7 +860,7 @@ export async function actionBuyToken(
       result.signatures.forEach((sig, idx) => {
         console.log(
           chalk.gray(`  TX ${idx + 1}: `) +
-            chalk.cyan(getSolscanTxUrl(sig))
+          chalk.cyan(getSolscanTxUrl(sig))
         );
       });
     }
@@ -892,6 +897,7 @@ export async function actionSellToken(
 
   const tokenMint = await input({
     message: chalk.cyan("Enter pump.fun token mint address:"),
+    default: "GoaK2jtGywKTQxpEcPTFwQ15GVEy6aWW96R5k2h7pump",
     validate: (value) => value.length > 30 ? true : "Invalid mint address",
   });
 
@@ -1012,13 +1018,13 @@ export async function actionSellToken(
     printSuccess("Sell Orders Complete!");
     console.log(
       chalk.gray("  •") +
-        chalk.white(` Successful: `) +
-        chalk.green(`${result.success}`)
+      chalk.white(` Successful: `) +
+      chalk.green(`${result.success}`)
     );
     console.log(
       chalk.gray("  •") +
-        chalk.white(` Failed: `) +
-        chalk.red(`${result.failed}`)
+      chalk.white(` Failed: `) +
+      chalk.red(`${result.failed}`)
     );
 
     if (result.signatures && result.signatures.length > 0) {
@@ -1026,7 +1032,7 @@ export async function actionSellToken(
       result.signatures.forEach((sig, idx) => {
         console.log(
           chalk.gray(`  TX ${idx + 1}: `) +
-            chalk.cyan(getSolscanTxUrl(sig))
+          chalk.cyan(getSolscanTxUrl(sig))
         );
       });
     }
@@ -1077,8 +1083,8 @@ export async function actionTransferTokensToPayer(
     console.log(chalk.cyan.bold("  ══════════════════════════════════════════════════════════════\n"));
     console.log(
       chalk.gray("  ") +
-        chalk.white.bold("Token Mint".padEnd(46)) +
-        chalk.white.bold("Total Balance".padStart(20))
+      chalk.white.bold("Token Mint".padEnd(46)) +
+      chalk.white.bold("Total Balance".padStart(20))
     );
     console.log(chalk.cyan.bold("  ──────────────────────────────────────────────────────────────\n"));
 
@@ -1091,8 +1097,8 @@ export async function actionTransferTokensToPayer(
 
       console.log(
         chalk.gray("  ") +
-          chalk.cyan(mintDisplay.padEnd(46)) +
-          chalk.green(balanceDisplay.padStart(20))
+        chalk.cyan(mintDisplay.padEnd(46)) +
+        chalk.green(balanceDisplay.padStart(20))
       );
     }
 
@@ -1138,13 +1144,13 @@ export async function actionTransferTokensToPayer(
     printSuccess("Token Transfer Complete!");
     console.log(
       chalk.gray("  •") +
-        chalk.white(` Successful transfers: `) +
-        chalk.green(`${result.success}`)
+      chalk.white(` Successful transfers: `) +
+      chalk.green(`${result.success}`)
     );
     console.log(
       chalk.gray("  •") +
-        chalk.white(` Failed transfers: `) +
-        chalk.red(`${result.failed}`)
+      chalk.white(` Failed transfers: `) +
+      chalk.red(`${result.failed}`)
     );
 
     if (result.tokensTransferred.length > 0) {
@@ -1160,9 +1166,9 @@ export async function actionTransferTokensToPayer(
       for (const [mint, amount] of mintTotals) {
         console.log(
           chalk.gray("  ") +
-            chalk.cyan(mint.slice(0, 16) + "...") +
-            chalk.white(" → ") +
-            chalk.green(amount.toString())
+          chalk.cyan(mint.slice(0, 16) + "...") +
+          chalk.white(" → ") +
+          chalk.green(amount.toString())
         );
       }
     }
@@ -1172,7 +1178,7 @@ export async function actionTransferTokensToPayer(
       result.signatures.slice(0, 10).forEach((sig, idx) => {
         console.log(
           chalk.gray(`  TX ${idx + 1}: `) +
-            chalk.cyan(getSolscanTxUrl(sig))
+          chalk.cyan(getSolscanTxUrl(sig))
         );
       });
       if (result.signatures.length > 10) {
@@ -1184,6 +1190,318 @@ export async function actionTransferTokensToPayer(
   } catch (error: any) {
     spinner.stop();
     printError(`Transfer failed: ${error.message}`);
+  }
+
+  await pressAnyKeyToContinue();
+}
+
+// ============ QUICK BUY TOKEN ============
+
+export async function actionQuickBuyToken(
+  connection: Connection,
+  _payerWallet: Keypair
+): Promise<void> {
+  if (CONFIG.NETWORK !== "mainnet-beta") {
+    printError("Pump.fun trading only works on mainnet-beta!");
+    printInfo("Current network", CONFIG.NETWORK);
+    console.log(chalk.gray("\n  Set SOLANA_NETWORK=mainnet-beta in .env to enable trading.\n"));
+    await pressAnyKeyToContinue();
+    return;
+  }
+
+  const wallets = loadWalletsFromDir();
+
+  if (!wallets || wallets.length === 0) {
+    printError("No wallets found. Create wallets first!");
+    await pressAnyKeyToContinue();
+    return;
+  }
+
+  console.log(chalk.cyan.bold("\n  🚀 Quick Buy - " + QUICK_TRADE_TOKEN.slice(0, 12) + "...\n"));
+
+  const spinner = ora({
+    text: chalk.cyan("Fetching token info..."),
+    spinner: "dots",
+  }).start();
+
+  const tokenInfo = await fetchPumpTokenInfo(connection, QUICK_TRADE_TOKEN);
+
+  if (!tokenInfo) {
+    spinner.fail(chalk.red("Token not found on pump.fun"));
+    await pressAnyKeyToContinue();
+    return;
+  }
+
+  if (tokenInfo.graduated) {
+    spinner.fail(chalk.red("Token has graduated from pump.fun"));
+    await pressAnyKeyToContinue();
+    return;
+  }
+
+  spinner.succeed(chalk.green("Token found!"));
+
+  console.log(chalk.cyan.bold("\n  📊 Token Info\n"));
+  printInfo("Mint", QUICK_TRADE_TOKEN.slice(0, 20) + "...");
+  printInfo("Virtual SOL", `${(tokenInfo.virtualSolReserves.toNumber() / LAMPORTS_PER_SOL).toFixed(4)} SOL`);
+  printInfo("Buy Amount", "92% of each wallet's SOL balance");
+
+  const slippage = await number({
+    message: chalk.cyan("Slippage %") + chalk.gray(" (default: 25)") + chalk.cyan(":"),
+    default: 25,
+    step: 1,
+    validate: (value) => (value && value > 0 && value <= 100 ? true : "Must be 1-100"),
+  }) || 25;
+
+  const minDelaySeconds = await number({
+    message: chalk.cyan("Min delay between bundles (seconds)") + chalk.gray(" (default: 0)") + chalk.cyan(":"),
+    default: 0,
+    step: 1,
+    validate: (value) => (value !== undefined && value >= 0 ? true : "Must be >= 0"),
+  }) ?? 0;
+
+  const maxDelaySeconds = await number({
+    message: chalk.cyan("Max delay between bundles (seconds)") + chalk.gray(" (default: 0)") + chalk.cyan(":"),
+    default: 0,
+    step: 1,
+    validate: (value) => (value !== undefined && value >= minDelaySeconds ? true : "Must be >= min delay"),
+  }) ?? 0;
+
+  const shouldBuy = await confirm({
+    message: chalk.yellow(
+      `Buy with 92% of SOL balance from ${wallets.length} wallets?`
+    ),
+    default: true,
+  });
+
+  if (!shouldBuy) {
+    console.log(chalk.gray("\n  Cancelled.\n"));
+    await pressAnyKeyToContinue();
+    return;
+  }
+
+  console.log(chalk.cyan.bold("\n  🛒 Executing Buy Orders\n"));
+
+  const buySpinner = ora({
+    text: chalk.cyan("Processing buy orders..."),
+    spinner: "dots12",
+  }).start();
+
+  try {
+    const slippageBps = slippage * 100;
+
+    const result = await executeBuy(
+      connection,
+      wallets,
+      tokenInfo.mint,
+      slippageBps,
+      {
+        minDelayMs: minDelaySeconds * 1000,
+        maxDelayMs: maxDelaySeconds * 1000,
+        onProgress: (current, total, success, failed, lastTx) => {
+          const delayInfo = maxDelaySeconds > 0 ? chalk.gray(` (delay: ${minDelaySeconds}-${maxDelaySeconds}s)`) : "";
+          buySpinner.text = chalk.cyan(
+            `Wallet ${current}/${total} | ✓ ${success} | ✗ ${failed}${delayInfo}`
+          );
+        },
+      }
+    );
+
+    buySpinner.stop();
+
+    console.log(chalk.cyan.bold("\n  ══════════════════════════════════════════"));
+    printSuccess("Buy Orders Complete!");
+    console.log(
+      chalk.gray("  •") +
+      chalk.white(` Successful: `) +
+      chalk.green(`${result.success}`)
+    );
+    console.log(
+      chalk.gray("  •") +
+      chalk.white(` Failed: `) +
+      chalk.red(`${result.failed}`)
+    );
+
+    if (result.signatures && result.signatures.length > 0) {
+      console.log(chalk.cyan.bold("\n  📜 Transaction Signatures:\n"));
+      result.signatures.forEach((sig, idx) => {
+        console.log(
+          chalk.gray(`  TX ${idx + 1}: `) +
+          chalk.cyan(getSolscanTxUrl(sig))
+        );
+      });
+    }
+
+    console.log(chalk.cyan.bold("\n  ══════════════════════════════════════════\n"));
+  } catch (error: any) {
+    buySpinner.fail(chalk.red(`Buy failed: ${error.message}`));
+  }
+
+  await pressAnyKeyToContinue();
+}
+
+// ============ QUICK SELL TOKEN ============
+
+export async function actionQuickSellToken(
+  connection: Connection,
+  _payerWallet: Keypair
+): Promise<void> {
+  if (CONFIG.NETWORK !== "mainnet-beta") {
+    printError("Pump.fun trading only works on mainnet-beta!");
+    printInfo("Current network", CONFIG.NETWORK);
+    console.log(chalk.gray("\n  Set SOLANA_NETWORK=mainnet-beta in .env to enable trading.\n"));
+    await pressAnyKeyToContinue();
+    return;
+  }
+
+  const wallets = loadWalletsFromDir();
+
+  if (!wallets || wallets.length === 0) {
+    printError("No wallets found. Create wallets first!");
+    await pressAnyKeyToContinue();
+    return;
+  }
+
+  console.log(chalk.cyan.bold("\n  💰 Quick Sell - " + QUICK_TRADE_TOKEN.slice(0, 12) + "...\n"));
+
+  const spinner = ora({
+    text: chalk.cyan("Fetching token info and balances..."),
+    spinner: "dots",
+  }).start();
+
+  const tokenInfo = await fetchPumpTokenInfo(connection, QUICK_TRADE_TOKEN);
+
+  if (!tokenInfo) {
+    spinner.fail(chalk.red("Token not found on pump.fun"));
+    await pressAnyKeyToContinue();
+    return;
+  }
+
+  if (tokenInfo.graduated) {
+    spinner.fail(chalk.red("Token has graduated from pump.fun"));
+    await pressAnyKeyToContinue();
+    return;
+  }
+
+  const balances = await getTokenBalances(
+    connection,
+    wallets,
+    tokenInfo.mint
+  );
+
+  spinner.stop();
+
+  const walletsWithTokens = balances.filter((b) => b.balance.gt(new BN(0)));
+
+  if (walletsWithTokens.length === 0) {
+    printWarning("No wallets hold this token.");
+    await pressAnyKeyToContinue();
+    return;
+  }
+
+  const totalTokens = walletsWithTokens.reduce(
+    (sum, w) => sum.add(w.balance),
+    new BN(0)
+  );
+
+  console.log(chalk.cyan.bold("\n  📊 Token Holdings\n"));
+  printInfo("Token", QUICK_TRADE_TOKEN.slice(0, 20) + "...");
+  printInfo("Wallets with tokens", `${walletsWithTokens.length}`);
+  printInfo("Total tokens", totalTokens.toString());
+
+  const sellOption = await select<number | string>({
+    message: chalk.cyan("How much to sell?"),
+    choices: [
+      { name: chalk.white("100% - Sell all"), value: 100 },
+      { name: chalk.white("75%"), value: 75 },
+      { name: chalk.white("50%"), value: 50 },
+      { name: chalk.white("25%"), value: 25 },
+      { name: chalk.white("Custom percentage"), value: "custom" },
+    ],
+  });
+
+  let sellPercentage: number = typeof sellOption === "number" ? sellOption : 50;
+
+  if (sellOption === "custom") {
+    const customPercent = await number({
+      message: chalk.cyan("Enter percentage") + chalk.gray(" (default: 50)") + chalk.cyan(":"),
+      default: 50,
+      step: 1,
+      validate: (value) => (value && value > 0 && value <= 100 ? true : "Must be 1-100"),
+    });
+    sellPercentage = customPercent || 50;
+  }
+
+  const slippage = await number({
+    message: chalk.cyan("Slippage %") + chalk.gray(" (default: 25)") + chalk.cyan(":"),
+    default: 25,
+    step: 1,
+    validate: (value) => (value && value > 0 && value <= 100 ? true : "Must be 1-100"),
+  }) || 25;
+
+  const shouldSell = await confirm({
+    message: chalk.yellow(
+      `Sell ${sellPercentage}% of tokens from ${walletsWithTokens.length} wallets?`
+    ),
+    default: true,
+  });
+
+  if (!shouldSell) {
+    console.log(chalk.gray("\n  Cancelled.\n"));
+    await pressAnyKeyToContinue();
+    return;
+  }
+
+  console.log(chalk.cyan.bold("\n  💰 Executing Sell Orders\n"));
+
+  const sellSpinner = ora({
+    text: chalk.cyan("Processing sell orders..."),
+    spinner: "dots12",
+  }).start();
+
+  try {
+    const slippageBps = slippage * 100;
+
+    const result = await executeSell(
+      connection,
+      walletsWithTokens,
+      tokenInfo.mint,
+      sellPercentage,
+      slippageBps,
+      (current, total, success, failed, lastTx) => {
+        sellSpinner.text = chalk.cyan(
+          `Wallet ${current}/${total} | ✓ ${success} | ✗ ${failed}`
+        );
+      }
+    );
+
+    sellSpinner.stop();
+
+    console.log(chalk.cyan.bold("\n  ══════════════════════════════════════════"));
+    printSuccess("Sell Orders Complete!");
+    console.log(
+      chalk.gray("  •") +
+      chalk.white(` Successful: `) +
+      chalk.green(`${result.success}`)
+    );
+    console.log(
+      chalk.gray("  •") +
+      chalk.white(` Failed: `) +
+      chalk.red(`${result.failed}`)
+    );
+
+    if (result.signatures && result.signatures.length > 0) {
+      console.log(chalk.cyan.bold("\n  📜 Transaction Signatures:\n"));
+      result.signatures.forEach((sig, idx) => {
+        console.log(
+          chalk.gray(`  TX ${idx + 1}: `) +
+          chalk.cyan(getSolscanTxUrl(sig))
+        );
+      });
+    }
+
+    console.log(chalk.cyan.bold("\n  ══════════════════════════════════════════\n"));
+  } catch (error: any) {
+    sellSpinner.fail(chalk.red(`Sell failed: ${error.message}`));
   }
 
   await pressAnyKeyToContinue();
@@ -1242,6 +1560,316 @@ export async function actionShowHelp(): Promise<void> {
   console.log(chalk.yellow("  • The wallets/ folder contains private keys - back it up securely"));
   console.log(chalk.yellow("  • Only use funds you can afford to lose"));
   console.log(chalk.yellow("  • This software is provided as-is without warranty\n"));
+
+  await pressAnyKeyToContinue();
+}
+
+// ============ BUY TOKEN (SWAP) ============
+
+export async function actionBuyTokenSwap(
+  connection: Connection,
+  _payerWallet: Keypair
+): Promise<void> {
+  if (CONFIG.NETWORK !== "mainnet-beta") {
+    printError("Pump.fun trading only works on mainnet-beta!");
+    printInfo("Current network", CONFIG.NETWORK);
+    console.log(chalk.gray("\n  Set SOLANA_NETWORK=mainnet-beta in .env to enable trading.\n"));
+    await pressAnyKeyToContinue();
+    return;
+  }
+
+  const wallets = loadWalletsFromDir();
+
+  if (!wallets || wallets.length === 0) {
+    printError("No wallets found. Create wallets first!");
+    await pressAnyKeyToContinue();
+    return;
+  }
+
+  console.log(chalk.cyan.bold("\n  🔄 Buy Token (via PumpSwap)\n"));
+
+  const tokenMint = await input({
+    message: chalk.cyan("Enter pump.fun token mint address:"),
+    default: "GoaK2jtGywKTQxpEcPTFwQ15GVEy6aWW96R5k2h7pump",
+    validate: (value) => value.length > 30 ? true : "Invalid mint address",
+  });
+
+  const spinner = ora({
+    text: chalk.cyan("Fetching token info..."),
+    spinner: "dots",
+  }).start();
+
+  const tokenInfo = await fetchPumpTokenInfo(connection, tokenMint);
+
+  if (!tokenInfo) {
+    spinner.fail(chalk.red("Token not found on pump.fun"));
+    await pressAnyKeyToContinue();
+    return;
+  }
+
+  spinner.succeed(chalk.green("Token found!"));
+
+  console.log(chalk.cyan.bold("\n  📊 Token Info\n"));
+  printInfo("Mint", tokenMint.slice(0, 20) + "...");
+  printInfo("Virtual SOL", `${(tokenInfo.virtualSolReserves.toNumber() / LAMPORTS_PER_SOL).toFixed(4)} SOL`);
+  printInfo("Buy Amount", "92% of each wallet's SOL balance");
+
+  const slippage = await number({
+    message: chalk.cyan("Slippage %") + chalk.gray(" (default: 25)") + chalk.cyan(":"),
+    default: 25,
+    step: 1,
+    validate: (value) => (value && value > 0 && value <= 100 ? true : "Must be 1-100"),
+  }) || 25;
+
+  const minDelaySeconds = await number({
+    message: chalk.cyan("Min delay between bundles (seconds)") + chalk.gray(" (default: 0)") + chalk.cyan(":"),
+    default: 0,
+    step: 1,
+    validate: (value) => (value !== undefined && value >= 0 ? true : "Must be >= 0"),
+  }) ?? 0;
+
+  const maxDelaySeconds = await number({
+    message: chalk.cyan("Max delay between bundles (seconds)") + chalk.gray(" (default: 0)") + chalk.cyan(":"),
+    default: 0,
+    step: 1,
+    validate: (value) => (value !== undefined && value >= minDelaySeconds ? true : "Must be >= min delay"),
+  }) ?? 0;
+
+  const shouldBuy = await confirm({
+    message: chalk.yellow(
+      `Swap Buy with 92% of SOL balance from ${wallets.length} wallets?`
+    ),
+    default: true,
+  });
+
+  if (!shouldBuy) {
+    console.log(chalk.gray("\n  Cancelled.\n"));
+    await pressAnyKeyToContinue();
+    return;
+  }
+
+  console.log(chalk.cyan.bold("\n  🛒 Executing Swap Buy Orders\n"));
+
+  const buySpinner = ora({
+    text: chalk.cyan("Processing swap buy orders..."),
+    spinner: "dots12",
+  }).start();
+
+  try {
+    const slippageBps = slippage * 100;
+
+    const result = await executeSwapBuy(
+      connection,
+      wallets,
+      tokenInfo.mint,
+      slippageBps,
+      {
+        minDelayMs: minDelaySeconds * 1000,
+        maxDelayMs: maxDelaySeconds * 1000,
+        onProgress: (current, total, success, failed, lastTx) => {
+          const delayInfo = maxDelaySeconds > 0 ? chalk.gray(` (delay: ${minDelaySeconds}-${maxDelaySeconds}s)`) : "";
+          buySpinner.text = chalk.cyan(
+            `Wallet ${current}/${total} | ✓ ${success} | ✗ ${failed}${delayInfo}`
+          );
+        },
+      }
+    );
+
+    buySpinner.stop();
+
+    console.log(chalk.cyan.bold("\n  ══════════════════════════════════════════"));
+    printSuccess("Swap Buy Orders Complete!");
+    console.log(
+      chalk.gray("  •") +
+      chalk.white(` Successful: `) +
+      chalk.green(`${result.success}`)
+    );
+    console.log(
+      chalk.gray("  •") +
+      chalk.white(` Failed: `) +
+      chalk.red(`${result.failed}`)
+    );
+
+    if (result.signatures && result.signatures.length > 0) {
+      console.log(chalk.cyan.bold("\n  📜 Transaction Signatures:\n"));
+      result.signatures.forEach((sig, idx) => {
+        console.log(
+          chalk.gray(`  TX ${idx + 1}: `) +
+          chalk.cyan(getSolscanTxUrl(sig))
+        );
+      });
+    }
+
+    console.log(chalk.cyan.bold("\n  ══════════════════════════════════════════\n"));
+  } catch (error: any) {
+    buySpinner.fail(chalk.red(`Swap Buy failed: ${error.message}`));
+  }
+
+  await pressAnyKeyToContinue();
+}
+
+// ============ SELL TOKEN (SWAP) ============
+
+export async function actionSellTokenSwap(
+  connection: Connection,
+  _payerWallet: Keypair
+): Promise<void> {
+  if (CONFIG.NETWORK !== "mainnet-beta") {
+    printError("Pump.fun trading only works on mainnet-beta!");
+    printInfo("Current network", CONFIG.NETWORK);
+    console.log(chalk.gray("\n  Set SOLANA_NETWORK=mainnet-beta in .env to enable trading.\n"));
+    await pressAnyKeyToContinue();
+    return;
+  }
+
+  const wallets = loadWalletsFromDir();
+
+  if (!wallets || wallets.length === 0) {
+    printError("No wallets found. Create wallets first!");
+    await pressAnyKeyToContinue();
+    return;
+  }
+
+  console.log(chalk.cyan.bold("\n  🔄 Sell Token (via PumpSwap)\n"));
+
+  const tokenMint = await input({
+    message: chalk.cyan("Enter pump.fun token mint address:"),
+    validate: (value) => value.length > 30 ? true : "Invalid mint address",
+  });
+
+  const spinner = ora({
+    text: chalk.cyan("Fetching token info and balances..."),
+    spinner: "dots",
+  }).start();
+
+  const tokenInfo = await fetchPumpTokenInfo(connection, tokenMint);
+
+  if (!tokenInfo) {
+    spinner.fail(chalk.red("Token not found on pump.fun"));
+    await pressAnyKeyToContinue();
+    return;
+  }
+
+  const balances = await getTokenBalances(
+    connection,
+    wallets,
+    tokenInfo.mint
+  );
+
+  spinner.stop();
+
+  const walletsWithTokens = balances.filter((b) => b.balance.gt(new BN(0)));
+
+  if (walletsWithTokens.length === 0) {
+    printWarning("No wallets hold this token.");
+    await pressAnyKeyToContinue();
+    return;
+  }
+
+  const totalTokens = walletsWithTokens.reduce(
+    (sum, w) => sum.add(w.balance),
+    new BN(0)
+  );
+
+  console.log(chalk.cyan.bold("\n  📊 Token Holdings\n"));
+  printInfo("Wallets with tokens", `${walletsWithTokens.length}`);
+  printInfo("Total tokens", totalTokens.toString());
+
+  const sellOption = await select<number | string>({
+    message: chalk.cyan("How much to sell?"),
+    choices: [
+      { name: chalk.white("100% - Sell all"), value: 100 },
+      { name: chalk.white("75%"), value: 75 },
+      { name: chalk.white("50%"), value: 50 },
+      { name: chalk.white("25%"), value: 25 },
+      { name: chalk.white("Custom percentage"), value: "custom" },
+    ],
+  });
+
+  let sellPercentage: number = typeof sellOption === "number" ? sellOption : 50;
+
+  if (sellOption === "custom") {
+    const customPercent = await number({
+      message: chalk.cyan("Enter percentage") + chalk.gray(" (default: 50)") + chalk.cyan(":"),
+      default: 50,
+      step: 1,
+      validate: (value) => (value && value > 0 && value <= 100 ? true : "Must be 1-100"),
+    });
+    sellPercentage = customPercent || 50;
+  }
+
+  const slippage = await number({
+    message: chalk.cyan("Slippage %") + chalk.gray(" (default: 25)") + chalk.cyan(":"),
+    default: 25,
+    step: 1,
+    validate: (value) => (value && value > 0 && value <= 100 ? true : "Must be 1-100"),
+  }) || 25;
+
+  const shouldSell = await confirm({
+    message: chalk.yellow(
+      `Swap Sell ${sellPercentage}% of tokens from ${walletsWithTokens.length} wallets?`
+    ),
+    default: true,
+  });
+
+  if (!shouldSell) {
+    console.log(chalk.gray("\n  Cancelled.\n"));
+    await pressAnyKeyToContinue();
+    return;
+  }
+
+  console.log(chalk.cyan.bold("\n  💰 Executing Swap Sell Orders\n"));
+
+  const sellSpinner = ora({
+    text: chalk.cyan("Processing swap sell orders..."),
+    spinner: "dots12",
+  }).start();
+
+  try {
+    const slippageBps = slippage * 100;
+
+    const result = await executeSwapSell(
+      connection,
+      walletsWithTokens,
+      tokenInfo.mint,
+      sellPercentage,
+      slippageBps,
+      (current, total, success, failed, lastTx) => {
+        sellSpinner.text = chalk.cyan(
+          `Wallet ${current}/${total} | ✓ ${success} | ✗ ${failed}`
+        );
+      }
+    );
+
+    sellSpinner.stop();
+
+    console.log(chalk.cyan.bold("\n  ══════════════════════════════════════════"));
+    printSuccess("Swap Sell Orders Complete!");
+    console.log(
+      chalk.gray("  •") +
+      chalk.white(` Successful: `) +
+      chalk.green(`${result.success}`)
+    );
+    console.log(
+      chalk.gray("  •") +
+      chalk.white(` Failed: `) +
+      chalk.red(`${result.failed}`)
+    );
+
+    if (result.signatures && result.signatures.length > 0) {
+      console.log(chalk.cyan.bold("\n  📜 Transaction Signatures:\n"));
+      result.signatures.forEach((sig, idx) => {
+        console.log(
+          chalk.gray(`  TX ${idx + 1}: `) +
+          chalk.cyan(getSolscanTxUrl(sig))
+        );
+      });
+    }
+
+    console.log(chalk.cyan.bold("\n  ══════════════════════════════════════════\n"));
+  } catch (error: any) {
+    sellSpinner.fail(chalk.red(`Swap Sell failed: ${error.message}`));
+  }
 
   await pressAnyKeyToContinue();
 }

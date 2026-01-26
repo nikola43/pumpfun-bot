@@ -19,7 +19,14 @@ import {
   actionBuyToken,
   actionSellToken,
   actionTransferTokensToPayer,
+  actionQuickBuyToken,
+  actionQuickSellToken,
+  actionBuyTokenSwap,
+  actionSellTokenSwap,
 } from "./actions";
+
+// Quick trade token for display
+const QUICK_TOKEN_DISPLAY = "GMk6j2d...Rpump";
 
 // ============ DASHBOARD ============
 
@@ -135,6 +142,24 @@ export async function showMainMenu(
         name: chalk.yellow("📤  Transfer Tokens to Payer"),
         value: "transfer_tokens",
       },
+      new Separator(chalk.magenta(" ── PumpSwap Trading ──")),
+      {
+        name: chalk.green("🔄  Buy Token (Swap)") + (CONFIG.NETWORK !== "mainnet-beta" ? chalk.gray(" (mainnet only)") : ""),
+        value: "buy_swap",
+      },
+      {
+        name: chalk.red("🔄  Sell Token (Swap)") + (CONFIG.NETWORK !== "mainnet-beta" ? chalk.gray(" (mainnet only)") : ""),
+        value: "sell_swap",
+      },
+      new Separator(chalk.blue(" ── Quick Trade (" + QUICK_TOKEN_DISPLAY + ") ──")),
+      {
+        name: chalk.green("⚡  Quick Buy") + (CONFIG.NETWORK !== "mainnet-beta" ? chalk.gray(" (mainnet only)") : ""),
+        value: "quick_buy",
+      },
+      {
+        name: chalk.red("⚡  Quick Sell") + (CONFIG.NETWORK !== "mainnet-beta" ? chalk.gray(" (mainnet only)") : ""),
+        value: "quick_sell",
+      },
       new Separator(),
       {
         name: chalk.gray("👋  Exit"),
@@ -178,6 +203,18 @@ export async function showMainMenu(
       break;
     case "transfer_tokens":
       await actionTransferTokensToPayer(connection, payerWallet);
+      break;
+    case "buy_swap":
+      await actionBuyTokenSwap(connection, payerWallet);
+      break;
+    case "sell_swap":
+      await actionSellTokenSwap(connection, payerWallet);
+      break;
+    case "quick_buy":
+      await actionQuickBuyToken(connection, payerWallet);
+      break;
+    case "quick_sell":
+      await actionQuickSellToken(connection, payerWallet);
       break;
     case "exit":
       console.log(chalk.cyan("\n  👋 Goodbye!\n"));
