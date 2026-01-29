@@ -40,6 +40,7 @@ function getRandomDelay(minMs: number, maxMs: number): number {
 async function sendTransactionWithConfirmation(
     connection: Connection,
     transaction: VersionedTransaction,
+    blockhashInfo: { blockhash: string; lastValidBlockHeight: number },
     maxWaitMs: number = 30000
 ): Promise<{ success: boolean; signature: string; error?: string }> {
     try {
@@ -49,13 +50,14 @@ async function sendTransactionWithConfirmation(
             preflightCommitment: "confirmed",
         });
 
-        // Wait for confirmation
-        const latestBlockhash = await connection.getLatestBlockhash();
+        console.log(`Sent tx: ${signature}`);
+
+        // Wait for confirmation using the same blockhash the transaction was built with
         const confirmation = await connection.confirmTransaction(
             {
                 signature,
-                blockhash: latestBlockhash.blockhash,
-                lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+                blockhash: blockhashInfo.blockhash,
+                lastValidBlockHeight: blockhashInfo.lastValidBlockHeight,
             },
             "confirmed"
         );
@@ -72,7 +74,7 @@ async function sendTransactionWithConfirmation(
     } catch (e) {
         return {
             success: false,
-            signature: "", // Might be empty if sendTransaction failed
+            signature: "",
             error: String(e),
         };
     }
@@ -123,7 +125,7 @@ export async function executeSwapBuy(
             const wallet = wallets[i];
 
             try {
-                const { blockhash } = await connection.getLatestBlockhash("confirmed");
+                const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
                 const walletBalance = await connection.getBalance(wallet.publicKey);
 
                 // Use 92% of balance
@@ -162,7 +164,7 @@ export async function executeSwapBuy(
                 transaction.sign([wallet]);
 
                 // Send transaction
-                const result = await sendTransactionWithConfirmation(connection, transaction, 60000);
+                const result = await sendTransactionWithConfirmation(connection, transaction, { blockhash, lastValidBlockHeight }, 60000);
 
                 if (result.success) {
                     success++;
@@ -248,7 +250,7 @@ export async function executeSwapSell(
             }
 
             try {
-                const { blockhash } = await connection.getLatestBlockhash("confirmed");
+                const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
 
                 // Prepare Swap State
                 // Note: swapSolanaState argument order is (poolKey, user)
@@ -276,7 +278,7 @@ export async function executeSwapSell(
                 const transaction = new VersionedTransaction(messageV0);
                 transaction.sign([wallet]);
 
-                const result = await sendTransactionWithConfirmation(connection, transaction, 60000);
+                const result = await sendTransactionWithConfirmation(connection, transaction, { blockhash, lastValidBlockHeight }, 60000);
 
                 if (result.success) {
                     success++;
@@ -290,7 +292,7 @@ export async function executeSwapSell(
                 onProgress?.(i + 1, walletsToSell.length, success, failed, result.signature);
 
                 if (i < walletsToSell.length - 1) {
-                    await sleep(250);
+                    await sleep(1000);
                 }
 
             } catch (e) {
