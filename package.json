@@ -6,7 +6,11 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "ts-node src/index.ts"
+    "dev": "ts-node src/index.ts",
+    "balances": "ts-node script/balances.ts",
+    "distribute-mid": "ts-node script/distribute-to-mid.ts",
+    "distribute-out": "ts-node script/distribute-to-out.ts",
+    "distribute-def": "ts-node script/distribute-to-def.ts"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1",
