@@ -1612,7 +1612,22 @@ export async function actionBuyTokenSwap(
   console.log(chalk.cyan.bold("\n  📊 Token Info\n"));
   printInfo("Mint", tokenMint.slice(0, 20) + "...");
   printInfo("Virtual SOL", `${(tokenInfo.virtualSolReserves.toNumber() / LAMPORTS_PER_SOL).toFixed(4)} SOL`);
-  printInfo("Buy Amount", "92% of each wallet's SOL balance");
+
+  const minSolAmount = await number({
+    message: chalk.cyan("Min buy amount per wallet (SOL):"),
+    default: 0.001,
+    step: 0.0001,
+    validate: (value) => (value && value > 0 ? true : "Must be > 0"),
+  }) || 0.001;
+
+  const maxSolAmount = await number({
+    message: chalk.cyan("Max buy amount per wallet (SOL):"),
+    default: 0.003,
+    step: 0.0001,
+    validate: (value) => (value && value >= minSolAmount ? true : `Must be >= ${minSolAmount}`),
+  }) || 0.003;
+
+  printInfo("Buy Amount", `random ${minSolAmount}-${maxSolAmount} SOL per wallet`);
 
   const slippage = await number({
     message: chalk.cyan("Slippage %") + chalk.gray(" (default: 25)") + chalk.cyan(":"),
@@ -1637,7 +1652,7 @@ export async function actionBuyTokenSwap(
 
   const shouldBuy = await confirm({
     message: chalk.yellow(
-      `Swap Buy with 92% of SOL balance from ${wallets.length} wallets?`
+      `Swap Buy ${minSolAmount}-${maxSolAmount} SOL per wallet from ${wallets.length} wallets?`
     ),
     default: true,
   });
@@ -1666,6 +1681,8 @@ export async function actionBuyTokenSwap(
       {
         minDelayMs: minDelaySeconds * 1000,
         maxDelayMs: maxDelaySeconds * 1000,
+        minSolAmount,
+        maxSolAmount,
         onProgress: (current, total, success, failed, lastTx) => {
           const delayInfo = maxDelaySeconds > 0 ? chalk.gray(` (delay: ${minDelaySeconds}-${maxDelaySeconds}s)`) : "";
           buySpinner.text = chalk.cyan(

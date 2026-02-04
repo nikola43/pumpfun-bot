@@ -86,6 +86,8 @@ async function sendTransactionWithConfirmation(
 export interface SwapBuyOptions {
     minDelayMs?: number;
     maxDelayMs?: number;
+    minSolAmount?: number;
+    maxSolAmount?: number;
     onProgress?: (current: number, total: number, success: number, failed: number, lastTx?: string) => void;
 }
 
@@ -100,7 +102,7 @@ export interface SwapBuyResult {
 
 /**
  * Execute buy using PumpSwap for multiple wallets
- * Each wallet sends its own independent transaction using 92% of SOL balance
+ * Each wallet sends its own independent transaction using a random SOL amount between min and max
  */
 export async function executeSwapBuy(
     connection: Connection,
@@ -128,8 +130,17 @@ export async function executeSwapBuy(
                 const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
                 const walletBalance = await connection.getBalance(wallet.publicKey);
 
-                // Use 92% of balance
-                const solAmountLamports = Math.floor(walletBalance * 0.92);
+                let solAmountLamports: number;
+                if (options?.minSolAmount !== undefined && options?.maxSolAmount !== undefined) {
+                    // Random amount between min and max
+                    const minLamports = Math.floor(options.minSolAmount * LAMPORTS_PER_SOL);
+                    const maxLamports = Math.floor(options.maxSolAmount * LAMPORTS_PER_SOL);
+                    solAmountLamports = minLamports + Math.floor(Math.random() * (maxLamports - minLamports));
+                    // Cap to wallet balance minus fee buffer
+                    solAmountLamports = Math.min(solAmountLamports, Math.floor(walletBalance * 0.92));
+                } else {
+                    solAmountLamports = Math.floor(walletBalance * 0.92);
+                }
 
                 if (solAmountLamports <= 50000) {
                     options?.onProgress?.(i + 1, wallets.length, success, failed);
@@ -140,11 +151,11 @@ export async function executeSwapBuy(
                 const state = await onlineSdk.swapSolanaState(poolKey, wallet.publicKey);
 
                 // Generate Buy Instructions using Offline SDK
-                // buyQuoteInput(state, quote, slippage)
+                // buyQuoteInput(state, quote, slippage) — slippage is percentage: 25 = 25%
                 const buyInstructions = await offlineSdk.buyQuoteInput(
                     state,
                     new BN(solAmountLamports),
-                    slippageBps / 10000
+                    slippageBps / 100
                 );
 
                 // Add priority fees
@@ -162,6 +173,15 @@ export async function executeSwapBuy(
 
                 const transaction = new VersionedTransaction(messageV0);
                 transaction.sign([wallet]);
+
+                // Simulate before sending
+                const simulation = await connection.simulateTransaction(transaction);
+                if (simulation.value.err) {
+                    console.error(`Simulation failed for wallet ${wallet.publicKey.toBase58().slice(0, 8)}: ${JSON.stringify(simulation.value.err)}`);
+                    failed++;
+                    options?.onProgress?.(i + 1, wallets.length, success, failed);
+                    continue;
+                }
 
                 // Send transaction
                 const result = await sendTransactionWithConfirmation(connection, transaction, { blockhash, lastValidBlockHeight }, 60000);
@@ -257,10 +277,11 @@ export async function executeSwapSell(
                 const state = await onlineSdk.swapSolanaState(poolKey, wallet.publicKey);
 
                 // Sell Token (Base) -> SOL (Quote)
+                // slippage is percentage: 25 = 25%
                 const sellInstructions = await offlineSdk.sellBaseInput(
                     state,
                     sellAmount,
-                    slippageBps / 10000
+                    slippageBps / 100
                 );
 
                 const instructions = [
@@ -277,6 +298,15 @@ export async function executeSwapSell(
 
                 const transaction = new VersionedTransaction(messageV0);
                 transaction.sign([wallet]);
+
+                // Simulate before sending
+                const simulation = await connection.simulateTransaction(transaction);
+                if (simulation.value.err) {
+                    console.error(`Simulation failed for wallet ${wallet.publicKey.toBase58().slice(0, 8)}: ${JSON.stringify(simulation.value.err)}`);
+                    failed++;
+                    onProgress?.(i + 1, walletsToSell.length, success, failed);
+                    continue;
+                }
 
                 const result = await sendTransactionWithConfirmation(connection, transaction, { blockhash, lastValidBlockHeight }, 60000);
 
