@@ -53,22 +53,22 @@ async function sendTransactionWithConfirmation(
         console.log(`Sent tx: ${signature}`);
 
         // Wait for confirmation using the same blockhash the transaction was built with
-        // const confirmation = await connection.confirmTransaction(
-        //     {
-        //         signature,
-        //         blockhash: blockhashInfo.blockhash,
-        //         lastValidBlockHeight: blockhashInfo.lastValidBlockHeight,
-        //     },
-        //     "confirmed"
-        // );
+        const confirmation = await connection.confirmTransaction(
+            {
+                signature,
+                blockhash: blockhashInfo.blockhash,
+                lastValidBlockHeight: blockhashInfo.lastValidBlockHeight,
+            },
+            "confirmed"
+        );
 
-        // if (confirmation.value.err) {
-        //     return {
-        //         success: false,
-        //         signature,
-        //         error: JSON.stringify(confirmation.value.err),
-        //     };
-        // }
+        if (confirmation.value.err) {
+            return {
+                success: false,
+                signature,
+                error: JSON.stringify(confirmation.value.err),
+            };
+        }
 
         return { success: true, signature };
     } catch (e) {

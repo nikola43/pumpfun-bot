@@ -57,6 +57,19 @@ export async function sendRegularTransactionsWithAmounts(
   for (let i = 0; i < targetWallets.length; i += TRANSFERS_PER_TX) {
     const batchWallets = targetWallets.slice(i, i + TRANSFERS_PER_TX);
     const batchAmounts = amounts.slice(i, i + TRANSFERS_PER_TX);
+
+    // Check payer balance before each batch
+    const batchTotal = batchAmounts.reduce((sum, a) => sum + a, 0);
+    try {
+      const payerBalance = await getBalanceWithRetry(connection, fundingWallet.publicKey);
+      if (payerBalance < batchTotal + 10000) {
+        console.error(`Insufficient payer balance for batch ${Math.floor(i / TRANSFERS_PER_TX) + 1}: ${payerBalance} lamports available, ${batchTotal + 10000} needed`);
+        continue;
+      }
+    } catch (e) {
+      console.error(`Failed to check payer balance for batch ${Math.floor(i / TRANSFERS_PER_TX) + 1}:`, e);
+    }
+
     const transaction = new Transaction();
 
     for (let j = 0; j < batchWallets.length; j++) {
@@ -72,8 +85,8 @@ export async function sendRegularTransactionsWithAmounts(
     try {
       const signature = await connection.sendTransaction(transaction, [fundingWallet]);
       await connection.confirmTransaction(signature, "confirmed");
-    } catch {
-      // Silent fail for fallback
+    } catch (e) {
+      console.error(`Fallback transaction failed for batch ${Math.floor(i / TRANSFERS_PER_TX) + 1}:`, e);
     }
 
     await sleep(500);

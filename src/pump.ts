@@ -18,6 +18,7 @@ import {
 } from "@solana/spl-token";
 import BN from "bn.js";
 import bs58 from "bs58";
+import { getBalanceWithRetry, getBlockhashWithRetry } from "./utils";
 
 // Import from official pump-fun SDK
 import {
@@ -57,13 +58,14 @@ function getRandomDelay(minMs: number, maxMs: number): number {
 async function sendTransactionWithConfirmation(
   connection: Connection,
   transaction: VersionedTransaction,
+  blockhashInfo: { blockhash: string; lastValidBlockHeight: number },
   maxWaitMs: number = 30000
 ): Promise<{ success: boolean; signature: string; error?: string }> {
   const signature = bs58.encode(transaction.signatures[0]);
 
   try {
     await connection.sendTransaction(transaction, {
-      skipPreflight: true, // Skip since we already simulated
+      skipPreflight: true,
       maxRetries: 3,
       preflightCommitment: "confirmed",
     });
@@ -72,6 +74,20 @@ async function sendTransactionWithConfirmation(
     const startTime = Date.now();
 
     while (Date.now() - startTime < maxWaitMs) {
+      // Check if blockhash has expired
+      try {
+        const currentBlockHeight = await connection.getBlockHeight("confirmed");
+        if (currentBlockHeight > blockhashInfo.lastValidBlockHeight) {
+          return {
+            success: false,
+            signature,
+            error: "Blockhash expired before confirmation",
+          };
+        }
+      } catch {
+        // If we can't get block height, fall through to status check
+      }
+
       const statuses = await connection.getSignatureStatuses([signature]);
       const status = statuses.value[0];
 
@@ -282,10 +298,10 @@ export async function executeBuy(
     const wallet = wallets[i];
 
     try {
-      const { blockhash } = await connection.getLatestBlockhash("confirmed");
+      const { blockhash, lastValidBlockHeight } = await getBlockhashWithRetry(connection);
 
       // Get wallet's SOL balance and use 92% for the buy
-      const walletBalance = await connection.getBalance(wallet.publicKey);
+      const walletBalance = await getBalanceWithRetry(connection, wallet.publicKey);
       const solAmountLamports = Math.floor(walletBalance * 0.92);
 
       // Skip if wallet has insufficient balance (need some for fees)
@@ -339,8 +355,20 @@ export async function executeBuy(
       const transaction = new VersionedTransaction(messageV0);
       transaction.sign([wallet]);
 
+      // Simulate transaction before sending
+      const simResult = await simulateTransaction(connection, transaction);
+      if (!simResult.success) {
+        console.error(`Simulation failed for wallet ${wallet.publicKey.toBase58().slice(0, 8)}:`, simResult.error);
+        if (simResult.logs) {
+          console.error("Simulation logs:", simResult.logs.slice(-5).join("\n"));
+        }
+        failed++;
+        options?.onProgress?.(i + 1, wallets.length, success, failed);
+        continue;
+      }
+
       // Send transaction
-      const result = await sendTransactionWithConfirmation(connection, transaction, 60000);
+      const result = await sendTransactionWithConfirmation(connection, transaction, { blockhash, lastValidBlockHeight }, 60000);
 
       if (result.success) {
         success++;
@@ -432,7 +460,16 @@ export async function executeSell(
     }
 
     try {
-      const { blockhash } = await connection.getLatestBlockhash("confirmed");
+      const { blockhash, lastValidBlockHeight } = await getBlockhashWithRetry(connection);
+
+      // Check if wallet has enough SOL for transaction fees
+      const walletSolBalance = await getBalanceWithRetry(connection, wallet.publicKey);
+      if (walletSolBalance < 10000) {
+        console.log(`Wallet ${wallet.publicKey.toBase58().slice(0, 8)}... has insufficient SOL for fees (${walletSolBalance} lamports), skipping`);
+        failed++;
+        onProgress?.(i + 1, walletsToSell.length, success, failed);
+        continue;
+      }
 
       // Fetch sell state for this wallet
       const sellState = await sdk.fetchSellState(mint, wallet.publicKey, tokenProgram);
@@ -476,8 +513,20 @@ export async function executeSell(
       const transaction = new VersionedTransaction(messageV0);
       transaction.sign([wallet]);
 
+      // Simulate transaction before sending
+      const simResult = await simulateTransaction(connection, transaction);
+      if (!simResult.success) {
+        console.error(`Simulation failed for wallet ${wallet.publicKey.toBase58().slice(0, 8)}:`, simResult.error);
+        if (simResult.logs) {
+          console.error("Simulation logs:", simResult.logs.slice(-5).join("\n"));
+        }
+        failed++;
+        onProgress?.(i + 1, walletsToSell.length, success, failed);
+        continue;
+      }
+
       // Send transaction
-      const result = await sendTransactionWithConfirmation(connection, transaction, 60000);
+      const result = await sendTransactionWithConfirmation(connection, transaction, { blockhash, lastValidBlockHeight }, 60000);
 
       if (result.success) {
         success++;
@@ -736,7 +785,7 @@ export async function transferAllTokensToWallet(
     onProgress?.(progress, 100, `Processing transfer ${i + 1}/${allTransfers.length}...`);
 
     try {
-      const { blockhash } = await connection.getLatestBlockhash("confirmed");
+      const { blockhash, lastValidBlockHeight } = await getBlockhashWithRetry(connection);
       const mintPubkey = new PublicKey(token.mint);
 
       // Determine token program
@@ -795,8 +844,19 @@ export async function transferAllTokensToWallet(
         transaction.sign([holding.wallet]);
       }
 
+      // Simulate transaction before sending
+      const simResult = await simulateTransaction(connection, transaction);
+      if (!simResult.success) {
+        console.error(`Simulation failed for transfer from ${holding.wallet.publicKey.toBase58().slice(0, 8)}:`, simResult.error);
+        if (simResult.logs) {
+          console.error("Simulation logs:", simResult.logs.slice(-5).join("\n"));
+        }
+        failed++;
+        continue;
+      }
+
       // Send transaction
-      const result = await sendTransactionWithConfirmation(connection, transaction, 60000);
+      const result = await sendTransactionWithConfirmation(connection, transaction, { blockhash, lastValidBlockHeight }, 60000);
 
       if (result.success) {
         success++;
