@@ -40,10 +40,6 @@ import {
   extendLookupTable,
   getLookupTableAccount,
   waitForLookupTableActive,
-  sendBundleWithConfirmation,
-  getTipAccounts,
-  getRandomTipAccount,
-  getTipFloor,
 } from "./jito";
 import {
   fetchPumpTokenInfo,
@@ -519,184 +515,115 @@ export async function actionReturnSOL(
     return;
   }
 
-  // Get dynamic tip floor (99th percentile) with minimum floor for guaranteed landing
-  const MIN_TIP_LAMPORTS = 2_000_000; // Minimum 0.002 SOL
   const PRIORITY_FEE = { unitLimit: 250000, unitPrice: 250000 };
-
-  const tipFloorSpinner = ora({
-    text: chalk.cyan("Fetching 99th percentile tip floor..."),
-    spinner: "dots",
-  }).start();
-
-  let tipLamports: number;
-  try {
-    const fetchedTip = await getTipFloor(CONFIG.JITO_ENDPOINT, "99", CONFIG.JITO_CONFIG);
-    // Use max of fetched tip and minimum to ensure landing
-    tipLamports = Math.max(fetchedTip, MIN_TIP_LAMPORTS);
-    tipFloorSpinner.succeed(chalk.green(`Tip floor: ${(tipLamports / LAMPORTS_PER_SOL).toFixed(6)} SOL`));
-  } catch {
-    tipLamports = MIN_TIP_LAMPORTS;
-    tipFloorSpinner.warn(chalk.yellow(`Using default tip: ${(tipLamports / LAMPORTS_PER_SOL).toFixed(6)} SOL`));
-  }
-
-  // Rate limit protection - wait before making more Jito requests
-  await sleep(1500);
-
-  // Each wallet signs its own return, so max ~5 signers per tx
-  const RETURNS_PER_TX = 5;
-  const TXNS_PER_BUNDLE = 5;
-
-  const batches: { wallet: Keypair; balance: number }[][] = [];
-  for (let i = 0; i < walletsWithBalance.length; i += RETURNS_PER_TX) {
-    batches.push(walletsWithBalance.slice(i, i + RETURNS_PER_TX));
-  }
-
-  const bundleBatches: typeof batches[] = [];
-  for (let i = 0; i < batches.length; i += TXNS_PER_BUNDLE) {
-    bundleBatches.push(batches.slice(i, i + TXNS_PER_BUNDLE));
-  }
 
   let successful = 0;
   let failed = 0;
   let totalReturned = 0;
 
-  // Fetch tip accounts once (not per bundle) to avoid rate limiting
-  const tipAccounts = await getTipAccounts(CONFIG.JITO_ENDPOINT, CONFIG.JITO_CONFIG);
-
   console.log(chalk.cyan.bold("\n  🚀 Sending Return Transactions\n"));
 
-  for (let bundleIdx = 0; bundleIdx < bundleBatches.length; bundleIdx++) {
-    const bundleBatch = bundleBatches[bundleIdx];
+  for (let i = 0; i < walletsWithBalance.length; i++) {
+    const { wallet, balance } = walletsWithBalance[i];
 
-    const bundleSpinner = ora({
-      text: chalk.cyan(`Bundle ${bundleIdx + 1}/${bundleBatches.length}...`),
+    const txSpinner = ora({
+      text: chalk.cyan(`TX ${i + 1}/${walletsWithBalance.length} - wallet ${wallet.publicKey.toBase58().slice(0, 8)}...`),
       spinner: "dots12",
     }).start();
 
     try {
-      const { blockhash } = await getBlockhashWithRetry(connection);
-      const tipAccount = getRandomTipAccount(tipAccounts);
+      const { blockhash, lastValidBlockHeight } = await getBlockhashWithRetry(connection);
 
-      const serializedTransactions: string[] = [];
-      const signatures: string[] = [];
+      const instructions: any[] = [
+        ComputeBudgetProgram.setComputeUnitLimit({ units: PRIORITY_FEE.unitLimit }),
+        ComputeBudgetProgram.setComputeUnitPrice({ microLamports: PRIORITY_FEE.unitPrice }),
+      ];
 
-      for (let txIdx = 0; txIdx < bundleBatch.length; txIdx++) {
-        const txBatch = bundleBatch[txIdx];
-        const signers: Keypair[] = [payerWallet]; // Payer is always first signer (fee payer)
-        let txReturned = 0;
+      // Transfer entire balance from sub-wallet to payer
+      instructions.push({
+        programId: new PublicKey("11111111111111111111111111111111"),
+        keys: [
+          { pubkey: wallet.publicKey, isSigner: true, isWritable: true },
+          { pubkey: payerWallet.publicKey, isSigner: false, isWritable: true },
+        ],
+        data: Buffer.concat([
+          Buffer.from([2, 0, 0, 0]),
+          Buffer.from(new BN(balance).toArray("le", 8)),
+        ]),
+      });
 
-        // Check if this is the last tx in the bundle (needs tip)
-        const isLastTxInBundle = txIdx === bundleBatch.length - 1;
+      const messageV0 = new TransactionMessage({
+        payerKey: payerWallet.publicKey,
+        recentBlockhash: blockhash,
+        instructions,
+      }).compileToV0Message();
 
-        // Start with compute budget instructions for priority
-        const instructions: any[] = [
-          ComputeBudgetProgram.setComputeUnitLimit({ units: PRIORITY_FEE.unitLimit }),
-          ComputeBudgetProgram.setComputeUnitPrice({ microLamports: PRIORITY_FEE.unitPrice }),
-        ];
+      const transaction = new VersionedTransaction(messageV0);
+      transaction.sign([payerWallet, wallet]);
 
-        for (const { wallet, balance } of txBatch) {
-          // Drain entire balance - payer pays tx fees
-          if (balance > 0) {
-            instructions.push({
-              programId: new PublicKey("11111111111111111111111111111111"),
-              keys: [
-                { pubkey: wallet.publicKey, isSigner: true, isWritable: true },
-                { pubkey: payerWallet.publicKey, isSigner: false, isWritable: true },
-              ],
-              data: Buffer.concat([
-                Buffer.from([2, 0, 0, 0]),
-                Buffer.from(new BN(balance).toArray("le", 8)),
-              ]),
-            });
-            signers.push(wallet);
-            txReturned += balance;
+      const signature = bs58.encode(transaction.signatures[0]);
+
+      await connection.sendTransaction(transaction, {
+        skipPreflight: true,
+        maxRetries: 3,
+        preflightCommitment: "confirmed",
+      });
+
+      // Wait for confirmation
+      const startTime = Date.now();
+      let confirmed = false;
+
+      while (Date.now() - startTime < 30000) {
+        try {
+          const currentBlockHeight = await connection.getBlockHeight("confirmed");
+          if (currentBlockHeight > lastValidBlockHeight) {
+            break;
+          }
+        } catch {
+          // Fall through to status check
+        }
+
+        const statuses = await connection.getSignatureStatuses([signature]);
+        const status = statuses.value[0];
+
+        if (status !== null) {
+          if (status.err) {
+            break;
+          }
+          if (status.confirmationStatus === "confirmed" || status.confirmationStatus === "finalized") {
+            confirmed = true;
+            break;
           }
         }
 
-        // Add tip instruction on last tx of bundle
-        if (isLastTxInBundle && txReturned > 0) {
-          instructions.push({
-            programId: new PublicKey("11111111111111111111111111111111"),
-            keys: [
-              { pubkey: payerWallet.publicKey, isSigner: true, isWritable: true },
-              { pubkey: new PublicKey(tipAccount), isSigner: false, isWritable: true },
-            ],
-            data: Buffer.concat([
-              Buffer.from([2, 0, 0, 0]),
-              Buffer.from(new BN(tipLamports).toArray("le", 8)),
-            ]),
-          });
-        }
-
-        if (txReturned > 0) {
-          const messageV0 = new TransactionMessage({
-            payerKey: payerWallet.publicKey, // Payer pays tx fees
-            recentBlockhash: blockhash,
-            instructions,
-          }).compileToV0Message();
-
-          const transaction = new VersionedTransaction(messageV0);
-          transaction.sign(signers);
-
-          const sig = bs58.encode(transaction.signatures[0]);
-          signatures.push(sig);
-          serializedTransactions.push(bs58.encode(transaction.serialize()));
-          totalReturned += txReturned;
-        }
+        await sleep(2000);
       }
 
-      if (serializedTransactions.length > 0) {
-        bundleSpinner.text = chalk.cyan(`Bundle ${bundleIdx + 1} sending via SearcherClient...`);
-
-        // Send bundle and wait for confirmation using SearcherClient
-        const result = await sendBundleWithConfirmation(
-          serializedTransactions,
-          CONFIG.JITO_ENDPOINT,
-          CONFIG.JITO_CONFIG,
-          60000 // 60s timeout
+      if (confirmed) {
+        successful++;
+        totalReturned += balance;
+        txSpinner.succeed(
+          chalk.green(`TX ${i + 1}/${walletsWithBalance.length} confirmed `) +
+          chalk.gray(`(${(balance / LAMPORTS_PER_SOL).toFixed(6)} SOL)`)
         );
-
-        if (result.success && result.landed) {
-          successful++;
-          bundleSpinner.succeed(
-            chalk.green(`Bundle ${bundleIdx + 1}/${bundleBatches.length} LANDED`) +
-            (result.slot ? chalk.gray(` slot: ${result.slot}`) : "")
-          );
-          signatures.forEach((sig, idx) => {
-            console.log(
-              chalk.gray(`     TX ${idx + 1}: `) +
-              chalk.cyan(getSolscanTxUrl(sig))
-            );
-          });
-        } else if (result.success && !result.landed) {
-          // Bundle sent but confirmation timed out - likely still landed
-          bundleSpinner.warn(
-            chalk.yellow(`Bundle ${bundleIdx + 1} sent, confirmation pending`) +
-            chalk.gray(` ID: ${result.bundleId?.slice(0, 16)}...`)
-          );
-          signatures.forEach((sig, idx) => {
-            console.log(
-              chalk.gray(`     TX ${idx + 1}: `) +
-              chalk.cyan(getSolscanTxUrl(sig))
-            );
-          });
-          successful++; // Count as success since bundle was accepted
-        } else {
-          failed++;
-          bundleSpinner.fail(
-            chalk.red(`Bundle ${bundleIdx + 1} failed: ${result.error || "Unknown error"}`)
-          );
-        }
+        console.log(
+          chalk.gray(`     `) +
+          chalk.cyan(getSolscanTxUrl(signature))
+        );
       } else {
-        bundleSpinner.warn(chalk.yellow(`Bundle ${bundleIdx + 1} skipped (no valid returns)`));
+        failed++;
+        txSpinner.fail(
+          chalk.red(`TX ${i + 1}/${walletsWithBalance.length} failed`)
+        );
       }
 
-      if (bundleIdx < bundleBatches.length - 1) {
-        await sleep(1500); // Rate limit protection
+      // Small delay between transactions to avoid rate limiting
+      if (i < walletsWithBalance.length - 1) {
+        await sleep(500);
       }
     } catch (error: any) {
       failed++;
-      bundleSpinner.fail(chalk.red(`Bundle ${bundleIdx + 1} error: ${error.message || error}`));
+      txSpinner.fail(chalk.red(`TX ${i + 1}/${walletsWithBalance.length} error: ${error.message || error}`));
     }
   }
 
@@ -704,8 +631,8 @@ export async function actionReturnSOL(
   printSuccess("Return Complete!");
   console.log(
     chalk.gray("  •") +
-    chalk.white(` Successful bundles: `) +
-    chalk.green(`${successful}/${bundleBatches.length}`)
+    chalk.white(` Successful: `) +
+    chalk.green(`${successful}/${walletsWithBalance.length}`)
   );
   console.log(
     chalk.gray("  •") +
