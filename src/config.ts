@@ -54,7 +54,7 @@ export interface BalanceStats {
 
 const NETWORK_CONFIGS: Record<NetworkType, NetworkConfig> = {
   "mainnet-beta": {
-    RPC_URL: "https://mainnet.helius-rpc.com/?api-key=e26bf879-6bb4-49c0-aafa-8e4d86687455",
+    RPC_URL: "https://api.mainnet-beta.solana.com",
     JITO_ENDPOINT: JITO_ENDPOINTS.mainnet.london,
     JITO_CONFIG: {
       ...DEFAULT_JITO_CONFIG,

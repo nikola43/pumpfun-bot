@@ -617,9 +617,9 @@ export async function actionReturnSOL(
         );
       }
 
-      // Small delay between transactions to avoid rate limiting
+      // Delay between transactions to avoid rate limiting on public RPC
       if (i < walletsWithBalance.length - 1) {
-        await sleep(500);
+        await sleep(2500);
       }
     } catch (error: any) {
       failed++;
