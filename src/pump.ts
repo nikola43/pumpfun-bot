@@ -652,7 +652,7 @@ export async function getAllWalletTokenHoldings(
   wallets: Keypair[]
 ): Promise<WalletTokenHoldings[]> {
   const results: WalletTokenHoldings[] = [];
-  const BATCH_SIZE = 10;
+  const BATCH_SIZE = 5;
 
   for (let i = 0; i < wallets.length; i += BATCH_SIZE) {
     const batch = wallets.slice(i, i + BATCH_SIZE);
@@ -669,6 +669,12 @@ export async function getAllWalletTokenHoldings(
     );
 
     results.push(...batchResults);
+    console.log(`  Scanned ${Math.min(i + BATCH_SIZE, wallets.length)}/${wallets.length} wallets...`);
+
+    // Delay between batches to avoid rate limiting on public RPCs
+    if (i + BATCH_SIZE < wallets.length) {
+      await new Promise((r) => setTimeout(r, 500));
+    }
   }
 
   return results;
